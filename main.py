@@ -101,7 +101,7 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser(description="YOLO & SAM Inference Backend")
     parser.add_argument("--tunnel", action="store_true", help="Run in tunnel mode")
-    parser.add_argument("--server", type=str, default="https://pepeshit.ru", help="Server URL (default: https://pepeshit.ru)")
+    parser.add_argument("--server", type=str, default="https://pepeshit.ru/annotator-api", help="Server URL (default: https://pepeshit.ru/annotator-api)")
     parser.add_argument("--username", "-u", type=str, help="Username for authentication")
     parser.add_argument("--password", "-p", type=str, help="Password for authentication")
     parser.add_argument("--token", type=str, help="Use existing JWT token instead of login")
