@@ -35,14 +35,22 @@ app.include_router(sam3_router)
 
 async def login_and_get_token(api_url: str, username: str, password: str) -> str:
     import aiohttp
+    import ssl
     
     login_url = f"{api_url}/api/auth/login"
-    async with aiohttp.ClientSession() as session:
-        async with session.post(login_url, json={"username": username, "password": password}) as resp:
+    ssl_context = ssl.create_default_context()
+    ssl_context.check_hostname = False
+    ssl_context.verify_mode = ssl.CERT_NONE
+    
+    connector = aiohttp.TCPConnector(ssl=ssl_context)
+    async with aiohttp.ClientSession(connector=connector) as session:
+        headers = {"Content-Type": "application/json"}
+        async with session.post(login_url, json={"username": username, "password": password}, headers=headers) as resp:
+            response_text = await resp.text()
             if resp.status != 200:
-                error_text = await resp.text()
-                raise Exception(f"Login failed: {error_text}")
-            data = await resp.json()
+                raise Exception(f"Login failed ({resp.status}): {response_text}")
+            import json
+            data = json.loads(response_text)
             return data["access_token"]
 
 
