@@ -1,5 +1,5 @@
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from starlette.middleware.base import BaseHTTPMiddleware
 from pathlib import Path
 
@@ -7,21 +7,27 @@ from app.routers import health_router, yolo_router, sam3_router
 
 app = FastAPI(title="YOLO & SAM Inference Backend")
 
-class PrivateNetworkMiddleware(BaseHTTPMiddleware):
+class CORSPrivateNetworkMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
+        origin = request.headers.get("origin", "*")
+        
+        if request.method == "OPTIONS":
+            response = Response(status_code=204)
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "*"
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Allow-Private-Network"] = "true"
+            response.headers["Access-Control-Max-Age"] = "86400"
+            return response
+        
         response = await call_next(request)
+        response.headers["Access-Control-Allow-Origin"] = origin
+        response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Private-Network"] = "true"
         return response
 
-app.add_middleware(PrivateNetworkMiddleware)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app.add_middleware(CORSPrivateNetworkMiddleware)
 
 app.include_router(health_router)
 app.include_router(yolo_router)
