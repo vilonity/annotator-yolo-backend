@@ -33,8 +33,20 @@ app.include_router(health_router)
 app.include_router(yolo_router)
 app.include_router(sam3_router)
 
+async def login_and_get_token(api_url: str, username: str, password: str) -> str:
+    import aiohttp
+    
+    login_url = f"{api_url}/api/auth/login"
+    async with aiohttp.ClientSession() as session:
+        async with session.post(login_url, json={"username": username, "password": password}) as resp:
+            if resp.status != 200:
+                error_text = await resp.text()
+                raise Exception(f"Login failed: {error_text}")
+            data = await resp.json()
+            return data["access_token"]
+
+
 async def run_tunnel_mode(tunnel_url: str, token: str):
-    import asyncio
     from tunnel_client import TunnelClient, create_local_request_handler
 
     handler = await create_local_request_handler(app)
@@ -65,19 +77,35 @@ def run_local_mode():
         uvicorn.run(app, host="0.0.0.0", port=8002)
 
 
+async def run_tunnel_with_login(server_url: str, username: str, password: str):
+    print(f"Logging in as {username}...")
+    token = await login_and_get_token(server_url, username, password)
+    print("Login successful!")
+    
+    tunnel_url = server_url.replace("https://", "wss://").replace("http://", "ws://") + "/api/yolo-tunnel"
+    await run_tunnel_mode(tunnel_url, token)
+
+
 if __name__ == "__main__":
     import argparse
     import asyncio
+    import getpass
 
     parser = argparse.ArgumentParser(description="YOLO & SAM Inference Backend")
-    parser.add_argument("--tunnel", type=str, help="Tunnel WebSocket URL (e.g., wss://pepeshit.ru/api/yolo-tunnel)")
-    parser.add_argument("--token", type=str, help="Authentication token for tunnel")
+    parser.add_argument("--tunnel", action="store_true", help="Run in tunnel mode")
+    parser.add_argument("--server", type=str, default="https://pepeshit.ru", help="Server URL (default: https://pepeshit.ru)")
+    parser.add_argument("--username", "-u", type=str, help="Username for authentication")
+    parser.add_argument("--password", "-p", type=str, help="Password for authentication")
+    parser.add_argument("--token", type=str, help="Use existing JWT token instead of login")
     args = parser.parse_args()
 
-    if args.tunnel and args.token:
-        asyncio.run(run_tunnel_mode(args.tunnel, args.token))
-    elif args.tunnel or args.token:
-        print("Error: Both --tunnel and --token are required for tunnel mode")
-        exit(1)
+    if args.tunnel:
+        if args.token:
+            tunnel_url = args.server.replace("https://", "wss://").replace("http://", "ws://") + "/api/yolo-tunnel"
+            asyncio.run(run_tunnel_mode(tunnel_url, args.token))
+        else:
+            username = args.username or input("Username: ")
+            password = args.password or getpass.getpass("Password: ")
+            asyncio.run(run_tunnel_with_login(args.server, username, password))
     else:
         run_local_mode()
