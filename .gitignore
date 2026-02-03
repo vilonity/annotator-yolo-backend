@@ -1,4 +1,6 @@
 yolo_models/
+sam3_models/
+certs/
 __pycache__/
 *.pyc
 *.pyo
