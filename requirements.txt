@@ -11,6 +11,8 @@ Pillow
 opencv-python
 requests
 cryptography
+aiohttp
+httpx
 
 
 
