@@ -1,6 +1,4 @@
 @echo off
-echo YOLO Backend - Local HTTPS Mode
-echo.
 if not exist "certs\cert.pem" (
     if exist "mkcert.exe" (
         echo Generating trusted SSL certificates with mkcert...
@@ -12,7 +10,6 @@ if not exist "certs\cert.pem" (
         python generate_certs.py
     )
 )
-echo Starting server at https://127.0.0.1:8002
 python main.py
 
 
