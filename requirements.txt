@@ -3,7 +3,7 @@ uvicorn[standard]==0.29.0
 pydantic==2.7.1
 python-multipart==0.0.9
 ultralytics>=8.3.240
-PyYAML==6.0
+PyYAML>=6.0.3
 numpy
 torch>=1.8.0
 torchvision>=0.9.0
