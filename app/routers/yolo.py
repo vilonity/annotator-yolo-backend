@@ -1,6 +1,6 @@
 from typing import List
 
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import APIRouter, File, Form, UploadFile
 
 from app.schemas.yolo import (
     YoloModelInfo,
@@ -36,14 +36,6 @@ def delete_yolo_model(model_name: str):
 async def auto_annotate_images(
     model_name: str,
     payload: AutoAnnotateRequest,
-    request: Request,
 ):
-    print(f"[DEBUG] Origin: {request.headers.get('origin')}")
-    print(f"[DEBUG] Referer: {request.headers.get('referer')}")
-    print(f"[DEBUG] image_urls before: {payload.image_urls[:2]}")
-    from app.utils import resolve_relative_urls
-    payload.image_urls = resolve_relative_urls(payload.image_urls, request)
-    print(f"[DEBUG] image_urls after: {payload.image_urls[:2]}")
-
     annotations = YoloService.run_inference(model_name, payload)
     return AutoAnnotateResponse(annotations=annotations)

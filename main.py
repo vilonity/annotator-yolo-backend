@@ -1,21 +1,11 @@
 from fastapi import FastAPI, Request
-from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from pathlib import Path
 
 from app.routers import health_router, yolo_router, sam3_router
 
 app = FastAPI(title="YOLO & SAM Inference Backend")
-
-
-@app.exception_handler(RequestValidationError)
-async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    print(f"[VALIDATION ERROR] {request.url}")
-    print(f"[VALIDATION ERROR] Body: {exc.body}")
-    print(f"[VALIDATION ERROR] Errors: {exc.errors()}")
-    return JSONResponse(status_code=422, content={"detail": exc.errors()})
 
 class PrivateNetworkMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):

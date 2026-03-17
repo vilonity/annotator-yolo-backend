@@ -8,7 +8,6 @@ from fastapi import HTTPException
 
 def load_image_from_url(url: str) -> np.ndarray:
     try:
-        print(f"[DEBUG] Loading image from URL: {url}")
         response = requests.get(url, timeout=30)
         response.raise_for_status()
 

@@ -1,6 +1,6 @@
 from typing import List
 
-from fastapi import APIRouter, File, Form, Request, UploadFile
+from fastapi import APIRouter, File, Form, UploadFile
 
 from app.schemas.sam3 import (
     Sam3ModelInfo,
@@ -39,10 +39,7 @@ def delete_sam3_model(model_name: str):
 async def sam3_annotate(
     model_name: str,
     payload: Sam3AnnotateRequest,
-    request: Request,
 ):
-    from app.utils import resolve_relative_url
-    payload.image_url = resolve_relative_url(payload.image_url, request)
     return Sam3Service.annotate(model_name, payload)
 
 
@@ -50,10 +47,7 @@ async def sam3_annotate(
 async def sam3_concept_segment(
     model_name: str,
     payload: Sam3ConceptRequest,
-    request: Request,
 ):
-    from app.utils import resolve_relative_url
-    payload.image_url = resolve_relative_url(payload.image_url, request)
     return Sam3Service.concept_segment(model_name, payload)
 
 
@@ -61,8 +55,5 @@ async def sam3_concept_segment(
 async def sam3_concept_batch(
     model_name: str,
     payload: Sam3ConceptBatchRequest,
-    request: Request,
 ):
-    from app.utils import resolve_relative_urls
-    payload.image_urls = resolve_relative_urls(payload.image_urls, request)
     return Sam3Service.concept_batch(model_name, payload)
