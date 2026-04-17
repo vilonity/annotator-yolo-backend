@@ -44,6 +44,7 @@ class TrainingJobSummary(BaseModel):
     batch: Optional[int] = None
     workers: Optional[int] = None
     device: Optional[str] = None
+    device_name: Optional[str] = None
     total_images: int
     boxed_images: int
     empty_images: int
@@ -59,3 +60,12 @@ class TrainingJobSummary(BaseModel):
 
 class TrainingJobDetail(TrainingJobSummary):
     logs_tail: list[str] = Field(default_factory=list)
+
+
+class DeviceInfo(BaseModel):
+    id: str
+    name: str
+
+
+class DevicesResponse(BaseModel):
+    devices: list[DeviceInfo]

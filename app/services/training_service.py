@@ -17,7 +17,56 @@ import yaml
 from fastapi import HTTPException, UploadFile
 
 from app.config import BASE_DIR, TRAIN_JOBS_DIR, YOLO_MODELS_DIR
-from app.schemas.training import TrainingJobDetail, TrainingJobSummary
+from app.schemas.training import DeviceInfo, TrainingJobDetail, TrainingJobSummary
+
+
+def _resolve_device_name(device: Optional[str]) -> Optional[str]:
+    try:
+        import torch
+    except ImportError:
+        return None
+
+    normalized = (device or "auto").strip().lower()
+
+    if normalized == "cpu":
+        return "CPU"
+
+    if normalized.startswith("cuda") or normalized.isdigit():
+        if not torch.cuda.is_available():
+            return None
+        index = 0
+        if ":" in normalized:
+            try:
+                index = int(normalized.split(":", 1)[1])
+            except ValueError:
+                index = 0
+        elif normalized.isdigit():
+            index = int(normalized)
+        if index >= torch.cuda.device_count():
+            return None
+        return torch.cuda.get_device_name(index)
+
+    if torch.cuda.is_available() and torch.cuda.device_count() > 0:
+        return torch.cuda.get_device_name(0)
+
+    return "CPU"
+
+
+def _list_devices() -> list[DeviceInfo]:
+    devices: list[DeviceInfo] = [DeviceInfo(id="auto", name="auto")]
+
+    try:
+        import torch
+    except ImportError:
+        devices.append(DeviceInfo(id="cpu", name="CPU"))
+        return devices
+
+    if torch.cuda.is_available():
+        for index in range(torch.cuda.device_count()):
+            devices.append(DeviceInfo(id=f"cuda:{index}", name=torch.cuda.get_device_name(index)))
+
+    devices.append(DeviceInfo(id="cpu", name="CPU"))
+    return devices
 
 
 class TrainingService:
@@ -138,6 +187,7 @@ class TrainingService:
                 "batch": batch,
                 "workers": workers,
                 "device": device or "auto",
+                "device_name": _resolve_device_name(device),
                 "total_images": total_images,
                 "boxed_images": boxed_images,
                 "empty_images": empty_images,
@@ -250,6 +300,10 @@ class TrainingService:
     @classmethod
     def has_job(cls, job_id: str) -> bool:
         return cls._read_metadata(TRAIN_JOBS_DIR / job_id) is not None
+
+    @classmethod
+    def list_devices(cls) -> list[DeviceInfo]:
+        return _list_devices()
 
     @classmethod
     def read_full_logs(cls, job_id: str) -> str:

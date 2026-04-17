@@ -4,7 +4,7 @@ from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 
 from app.config import TRAIN_JOBS_DIR
-from app.schemas.training import TrainingJobDetail, TrainingJobSummary
+from app.schemas.training import DevicesResponse, TrainingJobDetail, TrainingJobSummary
 from app.services.training_service import TrainingService
 
 ARTIFACT_MEDIA_TYPES: dict[str, str] = {
@@ -19,6 +19,11 @@ ARTIFACT_MEDIA_TYPES: dict[str, str] = {
 }
 
 router = APIRouter(prefix="/training", tags=["training"])
+
+
+@router.get("/devices", response_model=DevicesResponse)
+def list_training_devices():
+    return DevicesResponse(devices=TrainingService.list_devices())
 
 
 @router.post("/jobs", response_model=TrainingJobDetail)

@@ -592,6 +592,27 @@
         }
       }
     },
+    "/training/devices": {
+      "get": {
+        "tags": [
+          "training"
+        ],
+        "summary": "List Training Devices",
+        "operationId": "list_training_devices_training_devices_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DevicesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/training/jobs": {
       "post": {
         "tags": [
@@ -826,6 +847,55 @@
         }
       }
     },
+    "/training/jobs/{job_id}/artifacts/{filename}": {
+      "get": {
+        "tags": [
+          "training"
+        ],
+        "summary": "Get Training Job Artifact",
+        "operationId": "get_training_job_artifact_training_jobs__job_id__artifacts__filename__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          },
+          {
+            "name": "filename",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Filename"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/training/jobs/{job_id}/logs/stream": {
       "get": {
         "tags": [
@@ -1018,6 +1088,17 @@
             ],
             "title": "Batch"
           },
+          "workers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workers"
+          },
           "device": {
             "anyOf": [
               {
@@ -1111,6 +1192,40 @@
           "classes_file"
         ],
         "title": "Body_upload_yolo_model_yolo_models_post"
+      },
+      "DeviceInfo": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "name"
+        ],
+        "title": "DeviceInfo"
+      },
+      "DevicesResponse": {
+        "properties": {
+          "devices": {
+            "items": {
+              "$ref": "#/components/schemas/DeviceInfo"
+            },
+            "type": "array",
+            "title": "Devices"
+          }
+        },
+        "type": "object",
+        "required": [
+          "devices"
+        ],
+        "title": "DevicesResponse"
       },
       "DownloadSam3FromHuggingFaceRequest": {
         "properties": {
@@ -1635,6 +1750,17 @@
             ],
             "title": "Batch"
           },
+          "workers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workers"
+          },
           "device": {
             "anyOf": [
               {
@@ -1645,6 +1771,17 @@
               }
             ],
             "title": "Device"
+          },
+          "device_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Name"
           },
           "total_images": {
             "type": "integer",
@@ -1822,6 +1959,17 @@
             ],
             "title": "Batch"
           },
+          "workers": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workers"
+          },
           "device": {
             "anyOf": [
               {
@@ -1832,6 +1980,17 @@
               }
             ],
             "title": "Device"
+          },
+          "device_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device Name"
           },
           "total_images": {
             "type": "integer",
