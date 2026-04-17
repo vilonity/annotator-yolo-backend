@@ -46,13 +46,23 @@ if __name__ == "__main__":
     
     if ssl_keyfile.exists() and ssl_certfile.exists():
         uvicorn.run(
-            app,
+            "main:app",
             host="0.0.0.0",
             port=8002,
             ssl_keyfile=str(ssl_keyfile),
             ssl_certfile=str(ssl_certfile),
+            reload=True,
+            reload_dirs=[str(BASE_DIR / "app"), str(BASE_DIR)],
+            reload_includes=["*.py"],
         )
     else:
         print("SSL certificates not found. Run: python generate_certs.py")
         print("Starting without HTTPS...")
-        uvicorn.run(app, host="0.0.0.0", port=8002)
+        uvicorn.run(
+            "main:app",
+            host="0.0.0.0",
+            port=8002,
+            reload=True,
+            reload_dirs=[str(BASE_DIR / "app"), str(BASE_DIR)],
+            reload_includes=["*.py"],
+        )

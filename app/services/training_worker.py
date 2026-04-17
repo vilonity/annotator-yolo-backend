@@ -1,4 +1,5 @@
 import argparse
+import csv
 import json
 import shutil
 import sys
@@ -40,13 +41,12 @@ def main() -> int:
             "name": "train",
             "exist_ok": True,
             "epochs": int(config["epochs"]),
+            "imgsz": int(config.get("imgsz") or 640),
+            "batch": int(config.get("batch") or 16),
+            "workers": int(config["workers"]) if config.get("workers") is not None else 8,
             "verbose": True,
         }
 
-        if config.get("imgsz"):
-            train_args["imgsz"] = int(config["imgsz"])
-        if config.get("batch"):
-            train_args["batch"] = int(config["batch"])
         if config.get("device") and config["device"] != "auto":
             train_args["device"] = config["device"]
 
@@ -88,6 +88,8 @@ def main() -> int:
         metrics = normalize_metrics(results)
         with metrics_path.open("w", encoding="utf-8") as metrics_file:
             json.dump(metrics, metrics_file, ensure_ascii=True, indent=2)
+        if any(value is None for value in metrics.values()):
+            print(f"[training] WARNING: some metrics are null after normalization: {metrics}", flush=True)
 
         artifacts = {
             "best_weights_path": str(registered_weights),
@@ -133,12 +135,52 @@ def resolve_best_weights_path(results) -> Path | None:
 
 def normalize_metrics(results) -> dict[str, float | None]:
     raw_metrics = getattr(results, "results_dict", {}) or {}
-    return {
+    print(f"[training] results_dict keys: {list(raw_metrics.keys())}", flush=True)
+
+    metrics: dict[str, float | None] = {
         "precision": safe_float(raw_metrics.get("metrics/precision(B)") or raw_metrics.get("metrics/precision")),
         "recall": safe_float(raw_metrics.get("metrics/recall(B)") or raw_metrics.get("metrics/recall")),
         "map50": safe_float(raw_metrics.get("metrics/mAP50(B)") or raw_metrics.get("metrics/mAP50")),
         "map": safe_float(raw_metrics.get("metrics/mAP50-95(B)") or raw_metrics.get("metrics/mAP50-95")),
     }
+
+    if not all(value is not None for value in metrics.values()):
+        fallback = read_metrics_from_csv(Path(getattr(results, "save_dir", "") or "") / "results.csv")
+        if fallback:
+            print(f"[training] filling missing metrics from results.csv: {fallback}", flush=True)
+            for key, value in fallback.items():
+                if metrics[key] is None and value is not None:
+                    metrics[key] = value
+
+    return metrics
+
+
+def read_metrics_from_csv(csv_path: Path) -> dict[str, float | None] | None:
+    if not csv_path.exists():
+        return None
+    try:
+        with csv_path.open("r", encoding="utf-8", newline="") as csv_file:
+            rows = list(csv.DictReader(csv_file))
+    except OSError:
+        return None
+    if not rows:
+        return None
+
+    key_map = {
+        "precision": ("metrics/precision(B)", "metrics/precision"),
+        "recall": ("metrics/recall(B)", "metrics/recall"),
+        "map50": ("metrics/mAP50(B)", "metrics/mAP50"),
+        "map": ("metrics/mAP50-95(B)", "metrics/mAP50-95"),
+    }
+
+    for row in reversed(rows):
+        candidate = {
+            metric: safe_float(next((row[col] for col in columns if col in row and row[col] != ""), None))
+            for metric, columns in key_map.items()
+        }
+        if any(value is not None for value in candidate.values()):
+            return candidate
+    return None
 
 
 def safe_float(value) -> float | None:

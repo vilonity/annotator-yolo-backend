@@ -1,0 +1,2088 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "YOLO & SAM Inference Backend",
+    "version": "0.1.0"
+  },
+  "paths": {
+    "/health": {
+      "get": {
+        "tags": [
+          "health"
+        ],
+        "summary": "Health Check",
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          }
+        }
+      }
+    },
+    "/yolo-models": {
+      "get": {
+        "tags": [
+          "yolo"
+        ],
+        "summary": "List Yolo Models",
+        "operationId": "list_yolo_models_yolo_models_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/YoloModelInfo"
+                  },
+                  "type": "array",
+                  "title": "Response List Yolo Models Yolo Models Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "yolo"
+        ],
+        "summary": "Upload Yolo Model",
+        "operationId": "upload_yolo_model_yolo_models_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_yolo_model_yolo_models_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadModelResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/yolo-models/archive": {
+      "post": {
+        "tags": [
+          "yolo"
+        ],
+        "summary": "Upload Yolo Model Archive",
+        "operationId": "upload_yolo_model_archive_yolo_models_archive_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_yolo_model_archive_yolo_models_archive_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadModelResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/yolo-models/{model_name}/weights": {
+      "get": {
+        "tags": [
+          "yolo"
+        ],
+        "summary": "Download Yolo Model Weights",
+        "operationId": "download_yolo_model_weights_yolo_models__model_name__weights_get",
+        "parameters": [
+          {
+            "name": "model_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Model Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/yolo-models/{model_name}/classes": {
+      "get": {
+        "tags": [
+          "yolo"
+        ],
+        "summary": "Download Yolo Model Classes",
+        "operationId": "download_yolo_model_classes_yolo_models__model_name__classes_get",
+        "parameters": [
+          {
+            "name": "model_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Model Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/yolo-models/{model_name}": {
+      "delete": {
+        "tags": [
+          "yolo"
+        ],
+        "summary": "Delete Yolo Model",
+        "operationId": "delete_yolo_model_yolo_models__model_name__delete",
+        "parameters": [
+          {
+            "name": "model_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Model Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/yolo-models/{model_name}/annotate": {
+      "post": {
+        "tags": [
+          "yolo"
+        ],
+        "summary": "Auto Annotate Images",
+        "operationId": "auto_annotate_images_yolo_models__model_name__annotate_post",
+        "parameters": [
+          {
+            "name": "model_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Model Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AutoAnnotateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AutoAnnotateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sam3-models": {
+      "get": {
+        "tags": [
+          "sam3"
+        ],
+        "summary": "List Sam3 Models",
+        "operationId": "list_sam3_models_sam3_models_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Sam3ModelInfo"
+                  },
+                  "type": "array",
+                  "title": "Response List Sam3 Models Sam3 Models Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "sam3"
+        ],
+        "summary": "Upload Sam3 Model",
+        "operationId": "upload_sam3_model_sam3_models_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_sam3_model_sam3_models_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadSam3ModelResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sam3-models/download-from-huggingface": {
+      "post": {
+        "tags": [
+          "sam3"
+        ],
+        "summary": "Download Sam3 Model From Huggingface",
+        "operationId": "download_sam3_model_from_huggingface_sam3_models_download_from_huggingface_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DownloadSam3FromHuggingFaceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadSam3ModelResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sam3-models/{model_name}": {
+      "delete": {
+        "tags": [
+          "sam3"
+        ],
+        "summary": "Delete Sam3 Model",
+        "operationId": "delete_sam3_model_sam3_models__model_name__delete",
+        "parameters": [
+          {
+            "name": "model_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Model Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sam3-models/{model_name}/annotate": {
+      "post": {
+        "tags": [
+          "sam3"
+        ],
+        "summary": "Sam3 Annotate",
+        "operationId": "sam3_annotate_sam3_models__model_name__annotate_post",
+        "parameters": [
+          {
+            "name": "model_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Model Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Sam3AnnotateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sam3AnnotateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sam3-models/{model_name}/concept": {
+      "post": {
+        "tags": [
+          "sam3"
+        ],
+        "summary": "Sam3 Concept Segment",
+        "operationId": "sam3_concept_segment_sam3_models__model_name__concept_post",
+        "parameters": [
+          {
+            "name": "model_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Model Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Sam3ConceptRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sam3ConceptResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sam3-models/{model_name}/concept-batch": {
+      "post": {
+        "tags": [
+          "sam3"
+        ],
+        "summary": "Sam3 Concept Batch",
+        "operationId": "sam3_concept_batch_sam3_models__model_name__concept_batch_post",
+        "parameters": [
+          {
+            "name": "model_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Model Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Sam3ConceptBatchRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sam3ConceptBatchResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/training/jobs": {
+      "post": {
+        "tags": [
+          "training"
+        ],
+        "summary": "Start Training Job",
+        "operationId": "start_training_job_training_jobs_post",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_start_training_job_training_jobs_post"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrainingJobDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "tags": [
+          "training"
+        ],
+        "summary": "List Training Jobs",
+        "operationId": "list_training_jobs_training_jobs_get",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "User Id"
+            }
+          },
+          {
+            "name": "project_name",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Project Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/TrainingJobSummary"
+                  },
+                  "title": "Response List Training Jobs Training Jobs Get"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/training/jobs/{job_id}": {
+      "get": {
+        "tags": [
+          "training"
+        ],
+        "summary": "Get Training Job",
+        "operationId": "get_training_job_training_jobs__job_id__get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrainingJobDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/training/jobs/{job_id}/cancel": {
+      "post": {
+        "tags": [
+          "training"
+        ],
+        "summary": "Cancel Training Job",
+        "operationId": "cancel_training_job_training_jobs__job_id__cancel_post",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TrainingJobDetail"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/training/jobs/{job_id}/logs": {
+      "get": {
+        "tags": [
+          "training"
+        ],
+        "summary": "Get Training Job Logs",
+        "operationId": "get_training_job_logs_training_jobs__job_id__logs_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/training/jobs/{job_id}/logs/stream": {
+      "get": {
+        "tags": [
+          "training"
+        ],
+        "summary": "Stream Training Job Logs",
+        "operationId": "stream_training_job_logs_training_jobs__job_id__logs_stream_get",
+        "parameters": [
+          {
+            "name": "job_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Job Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "AutoAnnotateRequest": {
+        "properties": {
+          "image_urls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Image Urls"
+          },
+          "conf_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conf Threshold",
+            "default": 0.25
+          },
+          "imgsz": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Imgsz"
+          },
+          "class_map": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Class Map"
+          }
+        },
+        "type": "object",
+        "required": [
+          "image_urls"
+        ],
+        "title": "AutoAnnotateRequest"
+      },
+      "AutoAnnotateResponse": {
+        "properties": {
+          "annotations": {
+            "items": {
+              "items": {
+                "type": "object"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Annotations"
+          }
+        },
+        "type": "object",
+        "required": [
+          "annotations"
+        ],
+        "title": "AutoAnnotateResponse"
+      },
+      "Body_start_training_job_training_jobs_post": {
+        "properties": {
+          "dataset_file": {
+            "type": "string",
+            "format": "binary",
+            "title": "Dataset File"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "project_name": {
+            "type": "string",
+            "title": "Project Name"
+          },
+          "output_model_name": {
+            "type": "string",
+            "title": "Output Model Name"
+          },
+          "base_model": {
+            "type": "string",
+            "title": "Base Model"
+          },
+          "epochs": {
+            "type": "integer",
+            "title": "Epochs"
+          },
+          "train_percent": {
+            "type": "integer",
+            "title": "Train Percent"
+          },
+          "val_percent": {
+            "type": "integer",
+            "title": "Val Percent"
+          },
+          "test_percent": {
+            "type": "integer",
+            "title": "Test Percent"
+          },
+          "total_images": {
+            "type": "integer",
+            "title": "Total Images"
+          },
+          "boxed_images": {
+            "type": "integer",
+            "title": "Boxed Images"
+          },
+          "empty_images": {
+            "type": "integer",
+            "title": "Empty Images"
+          },
+          "classes_json": {
+            "type": "string",
+            "title": "Classes Json"
+          },
+          "imgsz": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Imgsz"
+          },
+          "batch": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch"
+          },
+          "device": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device",
+            "default": "auto"
+          }
+        },
+        "type": "object",
+        "required": [
+          "dataset_file",
+          "user_id",
+          "project_name",
+          "output_model_name",
+          "base_model",
+          "epochs",
+          "train_percent",
+          "val_percent",
+          "test_percent",
+          "total_images",
+          "boxed_images",
+          "empty_images",
+          "classes_json"
+        ],
+        "title": "Body_start_training_job_training_jobs_post"
+      },
+      "Body_upload_sam3_model_sam3_models_post": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "weights_file": {
+            "type": "string",
+            "format": "binary",
+            "title": "Weights File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "weights_file"
+        ],
+        "title": "Body_upload_sam3_model_sam3_models_post"
+      },
+      "Body_upload_yolo_model_archive_yolo_models_archive_post": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "archive_file": {
+            "type": "string",
+            "format": "binary",
+            "title": "Archive File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "archive_file"
+        ],
+        "title": "Body_upload_yolo_model_archive_yolo_models_archive_post"
+      },
+      "Body_upload_yolo_model_yolo_models_post": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "weights_file": {
+            "type": "string",
+            "format": "binary",
+            "title": "Weights File"
+          },
+          "classes_file": {
+            "type": "string",
+            "format": "binary",
+            "title": "Classes File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "weights_file",
+          "classes_file"
+        ],
+        "title": "Body_upload_yolo_model_yolo_models_post"
+      },
+      "DownloadSam3FromHuggingFaceRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "repo_id": {
+            "type": "string",
+            "title": "Repo Id",
+            "default": "facebook/sam3"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename",
+            "default": "sam3.pt"
+          },
+          "token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "DownloadSam3FromHuggingFaceRequest"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "type": "array",
+            "title": "Detail"
+          }
+        },
+        "type": "object",
+        "title": "HTTPValidationError"
+      },
+      "Sam3AnnotateRequest": {
+        "properties": {
+          "image_url": {
+            "type": "string",
+            "title": "Image Url"
+          },
+          "prompt_type": {
+            "type": "string",
+            "enum": [
+              "bbox",
+              "point",
+              "points",
+              "points_per_object",
+              "negative_points"
+            ],
+            "title": "Prompt Type"
+          },
+          "bboxes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bboxes"
+          },
+          "points": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Points"
+          },
+          "labels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Labels"
+          }
+        },
+        "type": "object",
+        "required": [
+          "image_url",
+          "prompt_type"
+        ],
+        "title": "Sam3AnnotateRequest"
+      },
+      "Sam3AnnotateResponse": {
+        "properties": {
+          "masks": {
+            "items": {
+              "items": {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Masks"
+          },
+          "boxes": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Boxes"
+          },
+          "confidences": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Confidences"
+          },
+          "mask_images": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Mask Images"
+          }
+        },
+        "type": "object",
+        "required": [
+          "masks",
+          "boxes",
+          "confidences",
+          "mask_images"
+        ],
+        "title": "Sam3AnnotateResponse"
+      },
+      "Sam3ConceptBatchRequest": {
+        "properties": {
+          "image_urls": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Image Urls"
+          },
+          "text_prompts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Text Prompts"
+          },
+          "conf_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conf Threshold",
+            "default": 0.25
+          },
+          "class_name": {
+            "type": "string",
+            "title": "Class Name"
+          },
+          "skip_duplicates": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Skip Duplicates",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "image_urls",
+          "text_prompts",
+          "class_name"
+        ],
+        "title": "Sam3ConceptBatchRequest"
+      },
+      "Sam3ConceptBatchResponse": {
+        "properties": {
+          "results": {
+            "items": {
+              "$ref": "#/components/schemas/Sam3ConceptBatchResultItem"
+            },
+            "type": "array",
+            "title": "Results"
+          }
+        },
+        "type": "object",
+        "required": [
+          "results"
+        ],
+        "title": "Sam3ConceptBatchResponse"
+      },
+      "Sam3ConceptBatchResultItem": {
+        "properties": {
+          "masks": {
+            "items": {
+              "items": {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Masks"
+          },
+          "boxes": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Boxes"
+          },
+          "confidences": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Confidences"
+          },
+          "prompt_indices": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Prompt Indices"
+          },
+          "mask_images": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Mask Images"
+          }
+        },
+        "type": "object",
+        "required": [
+          "masks",
+          "boxes",
+          "confidences",
+          "prompt_indices",
+          "mask_images"
+        ],
+        "title": "Sam3ConceptBatchResultItem"
+      },
+      "Sam3ConceptRequest": {
+        "properties": {
+          "image_url": {
+            "type": "string",
+            "title": "Image Url"
+          },
+          "text_prompts": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Text Prompts"
+          },
+          "conf_threshold": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conf Threshold",
+            "default": 0.25
+          }
+        },
+        "type": "object",
+        "required": [
+          "image_url",
+          "text_prompts"
+        ],
+        "title": "Sam3ConceptRequest"
+      },
+      "Sam3ConceptResponse": {
+        "properties": {
+          "masks": {
+            "items": {
+              "items": {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Masks"
+          },
+          "boxes": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Boxes"
+          },
+          "confidences": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Confidences"
+          },
+          "prompt_indices": {
+            "items": {
+              "type": "integer"
+            },
+            "type": "array",
+            "title": "Prompt Indices"
+          },
+          "mask_images": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Mask Images"
+          }
+        },
+        "type": "object",
+        "required": [
+          "masks",
+          "boxes",
+          "confidences",
+          "prompt_indices",
+          "mask_images"
+        ],
+        "title": "Sam3ConceptResponse"
+      },
+      "Sam3ModelInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "date_add": {
+            "type": "string",
+            "title": "Date Add"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "date_add"
+        ],
+        "title": "Sam3ModelInfo"
+      },
+      "SplitConfig": {
+        "properties": {
+          "train_percent": {
+            "type": "integer",
+            "title": "Train Percent"
+          },
+          "val_percent": {
+            "type": "integer",
+            "title": "Val Percent"
+          },
+          "test_percent": {
+            "type": "integer",
+            "title": "Test Percent"
+          }
+        },
+        "type": "object",
+        "required": [
+          "train_percent",
+          "val_percent",
+          "test_percent"
+        ],
+        "title": "SplitConfig"
+      },
+      "TrainingArtifacts": {
+        "properties": {
+          "best_weights_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Best Weights Path"
+          },
+          "results_csv_path": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Results Csv Path"
+          }
+        },
+        "type": "object",
+        "title": "TrainingArtifacts"
+      },
+      "TrainingJobDetail": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "project_name": {
+            "type": "string",
+            "title": "Project Name"
+          },
+          "output_model_name": {
+            "type": "string",
+            "title": "Output Model Name"
+          },
+          "produced_model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Produced Model Name"
+          },
+          "base_model": {
+            "type": "string",
+            "title": "Base Model"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "cancelling",
+              "cancelled",
+              "completed",
+              "failed",
+              "interrupted"
+            ],
+            "title": "Status"
+          },
+          "epochs": {
+            "type": "integer",
+            "title": "Epochs"
+          },
+          "imgsz": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Imgsz"
+          },
+          "batch": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch"
+          },
+          "device": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device"
+          },
+          "total_images": {
+            "type": "integer",
+            "title": "Total Images"
+          },
+          "boxed_images": {
+            "type": "integer",
+            "title": "Boxed Images"
+          },
+          "empty_images": {
+            "type": "integer",
+            "title": "Empty Images"
+          },
+          "classes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Classes"
+          },
+          "split": {
+            "$ref": "#/components/schemas/SplitConfig"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "metrics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TrainingMetricsSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "artifacts": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TrainingArtifacts"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "logs_tail": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Logs Tail"
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "project_name",
+          "output_model_name",
+          "base_model",
+          "status",
+          "epochs",
+          "total_images",
+          "boxed_images",
+          "empty_images",
+          "split",
+          "created_at"
+        ],
+        "title": "TrainingJobDetail"
+      },
+      "TrainingJobSummary": {
+        "properties": {
+          "id": {
+            "type": "string",
+            "title": "Id"
+          },
+          "user_id": {
+            "type": "string",
+            "title": "User Id"
+          },
+          "project_name": {
+            "type": "string",
+            "title": "Project Name"
+          },
+          "output_model_name": {
+            "type": "string",
+            "title": "Output Model Name"
+          },
+          "produced_model_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Produced Model Name"
+          },
+          "base_model": {
+            "type": "string",
+            "title": "Base Model"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "queued",
+              "running",
+              "cancelling",
+              "cancelled",
+              "completed",
+              "failed",
+              "interrupted"
+            ],
+            "title": "Status"
+          },
+          "epochs": {
+            "type": "integer",
+            "title": "Epochs"
+          },
+          "imgsz": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Imgsz"
+          },
+          "batch": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Batch"
+          },
+          "device": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Device"
+          },
+          "total_images": {
+            "type": "integer",
+            "title": "Total Images"
+          },
+          "boxed_images": {
+            "type": "integer",
+            "title": "Boxed Images"
+          },
+          "empty_images": {
+            "type": "integer",
+            "title": "Empty Images"
+          },
+          "classes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Classes"
+          },
+          "split": {
+            "$ref": "#/components/schemas/SplitConfig"
+          },
+          "created_at": {
+            "type": "string",
+            "title": "Created At"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "metrics": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TrainingMetricsSummary"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error"
+          },
+          "artifacts": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TrainingArtifacts"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "type": "object",
+        "required": [
+          "id",
+          "user_id",
+          "project_name",
+          "output_model_name",
+          "base_model",
+          "status",
+          "epochs",
+          "total_images",
+          "boxed_images",
+          "empty_images",
+          "split",
+          "created_at"
+        ],
+        "title": "TrainingJobSummary"
+      },
+      "TrainingMetricsSummary": {
+        "properties": {
+          "precision": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precision"
+          },
+          "recall": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recall"
+          },
+          "map50": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Map50"
+          },
+          "map": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Map"
+          }
+        },
+        "type": "object",
+        "title": "TrainingMetricsSummary"
+      },
+      "UploadModelResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "classes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Classes"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "classes",
+          "message"
+        ],
+        "title": "UploadModelResponse"
+      },
+      "UploadSam3ModelResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "message"
+        ],
+        "title": "UploadSam3ModelResponse"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "type": "array",
+            "title": "Location"
+          },
+          "msg": {
+            "type": "string",
+            "title": "Message"
+          },
+          "type": {
+            "type": "string",
+            "title": "Error Type"
+          }
+        },
+        "type": "object",
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError"
+      },
+      "YoloModelInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "classes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Classes"
+          },
+          "date_add": {
+            "type": "string",
+            "title": "Date Add"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "classes",
+          "date_add"
+        ],
+        "title": "YoloModelInfo"
+      }
+    }
+  }
+}

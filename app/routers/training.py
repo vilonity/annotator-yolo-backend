@@ -1,9 +1,22 @@
 from typing import List, Optional
 
-from fastapi import APIRouter, File, Form, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 
+from app.config import TRAIN_JOBS_DIR
 from app.schemas.training import TrainingJobDetail, TrainingJobSummary
 from app.services.training_service import TrainingService
+
+ARTIFACT_MEDIA_TYPES: dict[str, str] = {
+    "results.png": "image/png",
+    "confusion_matrix.png": "image/png",
+    "confusion_matrix_normalized.png": "image/png",
+    "PR_curve.png": "image/png",
+    "F1_curve.png": "image/png",
+    "P_curve.png": "image/png",
+    "R_curve.png": "image/png",
+    "results.csv": "text/csv",
+}
 
 router = APIRouter(prefix="/training", tags=["training"])
 
@@ -25,6 +38,7 @@ async def start_training_job(
     classes_json: str = Form(...),
     imgsz: Optional[int] = Form(None),
     batch: Optional[int] = Form(None),
+    workers: Optional[int] = Form(None),
     device: Optional[str] = Form("auto"),
 ):
     return await TrainingService.start_job(
@@ -36,6 +50,7 @@ async def start_training_job(
         epochs=epochs,
         imgsz=imgsz,
         batch=batch,
+        workers=workers,
         device=device,
         train_percent=train_percent,
         val_percent=val_percent,
@@ -60,3 +75,35 @@ def get_training_job(job_id: str):
 @router.post("/jobs/{job_id}/cancel", response_model=TrainingJobDetail)
 def cancel_training_job(job_id: str):
     return TrainingService.cancel_job(job_id)
+
+
+@router.get("/jobs/{job_id}/logs", response_class=PlainTextResponse)
+def get_training_job_logs(job_id: str):
+    if not TrainingService.has_job(job_id):
+        raise HTTPException(status_code=404, detail="Training job not found")
+    return PlainTextResponse(TrainingService.read_full_logs(job_id), media_type="text/plain; charset=utf-8")
+
+
+@router.get("/jobs/{job_id}/artifacts/{filename}")
+def get_training_job_artifact(job_id: str, filename: str):
+    if filename not in ARTIFACT_MEDIA_TYPES:
+        raise HTTPException(status_code=400, detail="Unsupported artifact")
+    if not TrainingService.has_job(job_id):
+        raise HTTPException(status_code=404, detail="Training job not found")
+
+    artifact_path = TRAIN_JOBS_DIR / job_id / "runs" / "train" / filename
+    if not artifact_path.is_file():
+        raise HTTPException(status_code=404, detail="Artifact not available")
+
+    return FileResponse(artifact_path, media_type=ARTIFACT_MEDIA_TYPES[filename], filename=filename)
+
+
+@router.get("/jobs/{job_id}/logs/stream")
+async def stream_training_job_logs(job_id: str):
+    if not TrainingService.has_job(job_id):
+        raise HTTPException(status_code=404, detail="Training job not found")
+    return StreamingResponse(
+        TrainingService.stream_logs(job_id),
+        media_type="text/plain; charset=utf-8",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )

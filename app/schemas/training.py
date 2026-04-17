@@ -42,6 +42,7 @@ class TrainingJobSummary(BaseModel):
     epochs: int
     imgsz: Optional[int] = None
     batch: Optional[int] = None
+    workers: Optional[int] = None
     device: Optional[str] = None
     total_images: int
     boxed_images: int

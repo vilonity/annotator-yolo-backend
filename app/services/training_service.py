@@ -1,3 +1,4 @@
+import asyncio
 import json
 import shutil
 import subprocess
@@ -6,8 +7,13 @@ import threading
 import zipfile
 from datetime import datetime, UTC
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, AsyncIterator, Optional
 
+TERMINAL_STATUSES = {"completed", "failed", "cancelled", "interrupted"}
+LOG_STREAM_POLL_SECONDS = 0.5
+LOG_STREAM_TRAILING_GRACE_SECONDS = 2.0
+
+import yaml
 from fastapi import HTTPException, UploadFile
 
 from app.config import BASE_DIR, TRAIN_JOBS_DIR, YOLO_MODELS_DIR
@@ -56,6 +62,7 @@ class TrainingService:
         classes_json: str,
         imgsz: Optional[int] = None,
         batch: Optional[int] = None,
+        workers: Optional[int] = None,
         device: Optional[str] = None,
     ) -> TrainingJobDetail:
         if (YOLO_MODELS_DIR / output_model_name).exists():
@@ -96,6 +103,8 @@ class TrainingService:
             if dataset_root != dataset_dir:
                 cls._flatten_dataset_root(dataset_root, dataset_dir)
 
+            cls._pin_data_yaml_path(dataset_dir)
+
             config = {
                 "job_id": job_id,
                 "user_id": user_id,
@@ -105,6 +114,7 @@ class TrainingService:
                 "epochs": epochs,
                 "imgsz": imgsz,
                 "batch": batch,
+                "workers": workers,
                 "device": device or "auto",
                 "split": {
                     "train_percent": train_percent,
@@ -126,6 +136,7 @@ class TrainingService:
                 "epochs": epochs,
                 "imgsz": imgsz,
                 "batch": batch,
+                "workers": workers,
                 "device": device or "auto",
                 "total_images": total_images,
                 "boxed_images": boxed_images,
@@ -237,6 +248,45 @@ class TrainingService:
         return cls.get_job(job_id)
 
     @classmethod
+    def has_job(cls, job_id: str) -> bool:
+        return cls._read_metadata(TRAIN_JOBS_DIR / job_id) is not None
+
+    @classmethod
+    def read_full_logs(cls, job_id: str) -> str:
+        logs_path = TRAIN_JOBS_DIR / job_id / "logs.txt"
+        if not logs_path.exists():
+            return ""
+        with logs_path.open("r", encoding="utf-8", errors="ignore") as log_file:
+            return log_file.read()
+
+    @classmethod
+    async def stream_logs(cls, job_id: str) -> AsyncIterator[bytes]:
+        job_dir = TRAIN_JOBS_DIR / job_id
+        logs_path = job_dir / "logs.txt"
+
+        position = 0
+        idle_after_terminal = 0.0
+
+        while True:
+            if logs_path.exists():
+                with logs_path.open("rb") as log_file:
+                    log_file.seek(position)
+                    chunk = log_file.read()
+                    position = log_file.tell()
+                if chunk:
+                    yield chunk
+
+            metadata = cls._read_metadata(job_dir) or {}
+            if metadata.get("status") in TERMINAL_STATUSES:
+                idle_after_terminal += LOG_STREAM_POLL_SECONDS
+                if idle_after_terminal >= LOG_STREAM_TRAILING_GRACE_SECONDS:
+                    return
+            else:
+                idle_after_terminal = 0.0
+
+            await asyncio.sleep(LOG_STREAM_POLL_SECONDS)
+
+    @classmethod
     def _monitor_process(cls, job_id: str, job_dir: Path) -> None:
         with cls._lock:
             process = cls._processes.get(job_id)
@@ -281,6 +331,17 @@ class TrainingService:
             return child_directories[0]
 
         return dataset_dir
+
+    @classmethod
+    def _pin_data_yaml_path(cls, dataset_dir: Path) -> None:
+        data_yaml_path = dataset_dir / "data.yaml"
+        with data_yaml_path.open("r", encoding="utf-8") as yaml_file:
+            data = yaml.safe_load(yaml_file) or {}
+
+        data["path"] = dataset_dir.resolve().as_posix()
+
+        with data_yaml_path.open("w", encoding="utf-8") as yaml_file:
+            yaml.safe_dump(data, yaml_file, sort_keys=False, allow_unicode=True)
 
     @classmethod
     def _flatten_dataset_root(cls, dataset_root: Path, dataset_dir: Path) -> None:

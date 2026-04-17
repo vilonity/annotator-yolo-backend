@@ -1,6 +1,7 @@
 from typing import List
 
 from fastapi import APIRouter, File, Form, UploadFile
+from fastapi.responses import FileResponse
 
 from app.schemas.yolo import (
     YoloModelInfo,
@@ -22,9 +23,37 @@ async def upload_yolo_model(
     return await YoloService.upload_model(name, weights_file, classes_file)
 
 
+@router.post("/archive", response_model=UploadModelResponse)
+async def upload_yolo_model_archive(
+    name: str = Form(...),
+    archive_file: UploadFile = File(...),
+):
+    return await YoloService.upload_model_archive(name, archive_file)
+
+
 @router.get("", response_model=List[YoloModelInfo])
 def list_yolo_models():
     return YoloService.list_models()
+
+
+@router.get("/{model_name}/weights")
+def download_yolo_model_weights(model_name: str):
+    weights_path, _ = YoloService.get_model_files(model_name)
+    return FileResponse(
+        path=str(weights_path),
+        media_type="application/octet-stream",
+        filename=f"{model_name}{weights_path.suffix}",
+    )
+
+
+@router.get("/{model_name}/classes")
+def download_yolo_model_classes(model_name: str):
+    _, classes_path = YoloService.get_model_files(model_name)
+    return FileResponse(
+        path=str(classes_path),
+        media_type="application/json",
+        filename=f"{model_name}-classes.json",
+    )
 
 
 @router.delete("/{model_name}", status_code=204)
