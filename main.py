@@ -1,11 +1,20 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from pathlib import Path
 
-from app.routers import health_router, yolo_router, sam3_router
+from app.routers import health_router, yolo_router, sam3_router, training_router
+from app.services.training_service import TrainingService
 
-app = FastAPI(title="YOLO & SAM Inference Backend")
+
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    TrainingService.initialize()
+    yield
+
+
+app = FastAPI(title="YOLO & SAM Inference Backend", lifespan=lifespan)
 
 class PrivateNetworkMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
@@ -26,6 +35,7 @@ app.add_middleware(PrivateNetworkMiddleware)
 app.include_router(health_router)
 app.include_router(yolo_router)
 app.include_router(sam3_router)
+app.include_router(training_router)
 
 if __name__ == "__main__":
     import uvicorn

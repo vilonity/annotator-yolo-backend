@@ -2,10 +2,12 @@ import json
 import shutil
 import base64
 from datetime import datetime
+from pathlib import Path
 from typing import List
 
 import cv2
 import numpy as np
+import requests
 from fastapi import HTTPException, UploadFile
 from ultralytics import SAM
 from ultralytics.models.sam import SAM3SemanticPredictor
@@ -14,6 +16,7 @@ from app.config import SAM3_MODELS_DIR
 from app.schemas.sam3 import (
     Sam3ModelInfo,
     UploadSam3ModelResponse,
+    DownloadSam3FromHuggingFaceRequest,
     Sam3AnnotateRequest,
     Sam3AnnotateResponse,
     Sam3ConceptRequest,
@@ -34,6 +37,32 @@ def mask_to_base64_png(mask_tensor) -> str:
 class Sam3Service:
     _visual_cache: dict[str, SAM] = {}
     _concept_cache: dict[str, SAM3SemanticPredictor] = {}
+
+    @staticmethod
+    def _validate_model_name(name: str) -> str:
+        normalized = name.strip()
+        if not normalized:
+            raise HTTPException(status_code=400, detail="Model name is required")
+        if normalized in {".", ".."}:
+            raise HTTPException(status_code=400, detail="Invalid model name")
+        if any(ch in normalized for ch in "\\/:*?\"<>|"):
+            raise HTTPException(status_code=400, detail="Model name contains unsupported characters")
+        return normalized
+
+    @staticmethod
+    def _write_metadata(model_dir: Path, metadata: dict) -> None:
+        metadata_path = model_dir / "metadata.json"
+        with metadata_path.open("w", encoding="utf-8") as f:
+            json.dump(metadata, f, ensure_ascii=True, indent=2)
+
+    @classmethod
+    def _prepare_model_dir(cls, name: str) -> tuple[str, Path]:
+        normalized_name = cls._validate_model_name(name)
+        model_dir = SAM3_MODELS_DIR / normalized_name
+        if model_dir.exists():
+            raise HTTPException(status_code=400, detail="SAM3 model with this name already exists")
+        model_dir.mkdir(parents=True, exist_ok=False)
+        return normalized_name, model_dir
 
     @classmethod
     def get_visual_model(cls, name: str) -> SAM:
@@ -98,24 +127,90 @@ class Sam3Service:
         name: str,
         weights_file: UploadFile,
     ) -> UploadSam3ModelResponse:
-        model_dir = SAM3_MODELS_DIR / name
-        if model_dir.exists():
-            raise HTTPException(status_code=400, detail="SAM3 model with this name already exists")
+        normalized_name, model_dir = cls._prepare_model_dir(name)
 
-        model_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            weights_storage_path = model_dir / "sam3.pt"
+            with weights_storage_path.open("wb") as buffer:
+                buffer.write(await weights_file.read())
 
-        weights_storage_path = model_dir / "sam3.pt"
-        with weights_storage_path.open("wb") as buffer:
-            buffer.write(await weights_file.read())
+            cls._write_metadata(
+                model_dir,
+                {
+                    "name": normalized_name,
+                    "source": "upload",
+                    "original_filename": weights_file.filename,
+                },
+            )
+        except Exception:
+            shutil.rmtree(model_dir, ignore_errors=True)
+            raise
 
-        metadata = {"name": name}
-        metadata_path = model_dir / "metadata.json"
-        with metadata_path.open("w") as f:
-            json.dump(metadata, f)
+        return UploadSam3ModelResponse(name=normalized_name, message="SAM3 model uploaded successfully")
+
+    @classmethod
+    def download_from_huggingface(
+        cls,
+        payload: DownloadSam3FromHuggingFaceRequest,
+    ) -> UploadSam3ModelResponse:
+        normalized_name, model_dir = cls._prepare_model_dir(payload.name)
+        source_filename = payload.filename.strip() or "sam3.pt"
+
+        if not source_filename.lower().endswith(".pt"):
+            shutil.rmtree(model_dir, ignore_errors=True)
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Only Ultralytics-compatible .pt weights can be installed automatically. "
+                    f"Received '{source_filename}'. Download the SAM3 .pt checkpoint from Hugging Face instead."
+                ),
+            )
+
+        download_url = f"https://huggingface.co/{payload.repo_id}/resolve/main/{source_filename}"
+        headers = {}
+        if payload.token:
+            headers["Authorization"] = f"Bearer {payload.token}"
+
+        try:
+            with requests.get(download_url, headers=headers, stream=True, timeout=(10, 600)) as response:
+                if response.status_code == 401:
+                    raise HTTPException(status_code=401, detail="Hugging Face token is invalid or missing access")
+                if response.status_code == 404:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"File '{source_filename}' was not found in Hugging Face repo '{payload.repo_id}'",
+                    )
+
+                response.raise_for_status()
+
+                weights_storage_path = model_dir / "sam3.pt"
+                with weights_storage_path.open("wb") as buffer:
+                    for chunk in response.iter_content(chunk_size=1024 * 1024):
+                        if chunk:
+                            buffer.write(chunk)
+
+            cls._write_metadata(
+                model_dir,
+                {
+                    "name": normalized_name,
+                    "source": "huggingface",
+                    "repo_id": payload.repo_id,
+                    "filename": source_filename,
+                },
+            )
+        except HTTPException:
+            shutil.rmtree(model_dir, ignore_errors=True)
+            raise
+        except requests.RequestException as exc:
+            shutil.rmtree(model_dir, ignore_errors=True)
+            raise HTTPException(status_code=502, detail=f"Failed to download SAM3 model from Hugging Face: {exc}") from exc
+        except Exception:
+            shutil.rmtree(model_dir, ignore_errors=True)
+            raise
 
         return UploadSam3ModelResponse(
-            name=name,
-            message="SAM3 model uploaded successfully"
+            name=normalized_name,
+            message=f"SAM3 model downloaded from Hugging Face and saved as sam3.pt",
         )
 
     @classmethod

@@ -1,16 +1,15 @@
-fastapi==0.111.0
-uvicorn[standard]==0.29.0
-pydantic==2.7.1
-python-multipart==0.0.9
-ultralytics>=8.3.240
-PyYAML==6.0
+fastapi==0.135.3
+uvicorn[standard]==0.44.0
+pydantic==2.13.1
+python-multipart==0.0.26
+ultralytics>=8.4.37
+PyYAML==6.0.3
 numpy
-torch>=1.8.0
-torchvision>=0.9.0
-Pillow
-opencv-python
-requests
-cryptography
-
+torch>=2.11.0
+torchvision>=0.26.0
+Pillow>=12.2.0
+opencv-python>=4.13.0.92
+requests>=2.33.1
+cryptography>=46.0.7
 
 

@@ -12,6 +12,13 @@ class UploadSam3ModelResponse(BaseModel):
     message: str
 
 
+class DownloadSam3FromHuggingFaceRequest(BaseModel):
+    name: str
+    repo_id: str = "facebook/sam3"
+    filename: str = "sam3.pt"
+    token: Optional[str] = None
+
+
 class Sam3AnnotateRequest(BaseModel):
     image_url: str
     prompt_type: Literal["bbox", "point", "points", "points_per_object", "negative_points"]

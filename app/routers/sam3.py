@@ -5,6 +5,7 @@ from fastapi import APIRouter, File, Form, UploadFile
 from app.schemas.sam3 import (
     Sam3ModelInfo,
     UploadSam3ModelResponse,
+    DownloadSam3FromHuggingFaceRequest,
     Sam3AnnotateRequest,
     Sam3AnnotateResponse,
     Sam3ConceptRequest,
@@ -23,6 +24,11 @@ async def upload_sam3_model(
     weights_file: UploadFile = File(...),
 ):
     return await Sam3Service.upload_model(name, weights_file)
+
+
+@router.post("/download-from-huggingface", response_model=UploadSam3ModelResponse)
+async def download_sam3_model_from_huggingface(payload: DownloadSam3FromHuggingFaceRequest):
+    return Sam3Service.download_from_huggingface(payload)
 
 
 @router.get("", response_model=List[Sam3ModelInfo])
