@@ -18,9 +18,14 @@ from fastapi import HTTPException, UploadFile
 
 from app.config import BASE_DIR, TRAIN_JOBS_DIR, YOLO_MODELS_DIR
 from app.schemas.training import DeviceInfo, TrainingJobDetail, TrainingJobSummary
+from app.services import runpod_training
+from app.services import training_callback
 
 
 def _resolve_device_name(device: Optional[str]) -> Optional[str]:
+    if runpod_training.is_runpod_device(device):
+        return runpod_training.resolve_runpod_device_name(device)
+
     try:
         import torch
     except ImportError:
@@ -52,21 +57,65 @@ def _resolve_device_name(device: Optional[str]) -> Optional[str]:
     return "CPU"
 
 
-def _list_devices() -> list[DeviceInfo]:
-    devices: list[DeviceInfo] = [DeviceInfo(id="auto", name="auto")]
+def _local_host_specs() -> dict[str, Optional[int]]:
+    specs: dict[str, Optional[int]] = {"ram_gb": None, "vcpus": None}
+    try:
+        import psutil
+
+        specs["ram_gb"] = int(round(psutil.virtual_memory().total / (1024**3)))
+        specs["vcpus"] = psutil.cpu_count(logical=True)
+    except ImportError:
+        pass
+    except Exception:  # noqa: BLE001
+        pass
+    return specs
+
+
+def _gpu_vram_gb(index: int) -> Optional[int]:
+    try:
+        import torch
+
+        props = torch.cuda.get_device_properties(index)
+        return int(round(props.total_memory / (1024**3)))
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def _list_local_devices() -> list[DeviceInfo]:
+    host = _local_host_specs()
+    devices: list[DeviceInfo] = [
+        DeviceInfo(id="auto", name="auto", provider="local", ram_gb=host["ram_gb"], vcpus=host["vcpus"])
+    ]
 
     try:
         import torch
     except ImportError:
-        devices.append(DeviceInfo(id="cpu", name="CPU"))
+        devices.append(
+            DeviceInfo(id="cpu", name="CPU", provider="local", ram_gb=host["ram_gb"], vcpus=host["vcpus"])
+        )
         return devices
 
     if torch.cuda.is_available():
         for index in range(torch.cuda.device_count()):
-            devices.append(DeviceInfo(id=f"cuda:{index}", name=torch.cuda.get_device_name(index)))
+            devices.append(
+                DeviceInfo(
+                    id=f"cuda:{index}",
+                    name=torch.cuda.get_device_name(index),
+                    provider="local",
+                    vram_gb=_gpu_vram_gb(index),
+                    ram_gb=host["ram_gb"],
+                    vcpus=host["vcpus"],
+                )
+            )
 
-    devices.append(DeviceInfo(id="cpu", name="CPU"))
+    devices.append(
+        DeviceInfo(id="cpu", name="CPU", provider="local", ram_gb=host["ram_gb"], vcpus=host["vcpus"])
+    )
     return devices
+
+
+def _list_runpod_devices() -> list[DeviceInfo]:
+    return [DeviceInfo(**entry) for entry in runpod_training.list_runpod_devices()]
 
 
 class TrainingService:
@@ -77,6 +126,7 @@ class TrainingService:
     @classmethod
     def initialize(cls) -> None:
         TRAIN_JOBS_DIR.mkdir(parents=True, exist_ok=True)
+        runpod_training.log_runpod_readiness()
 
         for job_dir in TRAIN_JOBS_DIR.iterdir():
             if not job_dir.is_dir():
@@ -91,6 +141,19 @@ class TrainingService:
                 metadata["completed_at"] = now_iso()
                 metadata.setdefault("error", "Training job was interrupted before completion")
                 cls._write_metadata(job_dir, metadata)
+
+                callback_url, callback_secret = training_callback.load_callback_settings(
+                    job_dir / "config.json"
+                )
+                training_callback.post_progress(
+                    callback_url,
+                    callback_secret,
+                    {
+                        "status": "interrupted",
+                        "error": metadata["error"],
+                        "completed_at": metadata["completed_at"],
+                    },
+                )
 
     @classmethod
     async def start_job(
@@ -113,7 +176,20 @@ class TrainingService:
         batch: Optional[int] = None,
         workers: Optional[int] = None,
         device: Optional[str] = None,
+        provider: str = "local",
+        external_callback_url: Optional[str] = None,
+        external_callback_secret: Optional[str] = None,
+        hyperparams_json: Optional[str] = None,
     ) -> TrainingJobDetail:
+        if provider not in {"local", "runpod"}:
+            raise HTTPException(status_code=400, detail="Invalid training provider")
+
+        if provider == "runpod" and not runpod_training.is_runpod_available():
+            raise HTTPException(
+                status_code=400,
+                detail="RunPod training is not configured on this server",
+            )
+
         if (YOLO_MODELS_DIR / output_model_name).exists():
             raise HTTPException(status_code=400, detail="Model with this name already exists")
 
@@ -124,6 +200,16 @@ class TrainingService:
 
         if not isinstance(classes, list) or not all(isinstance(item, str) for item in classes):
             raise HTTPException(status_code=400, detail="classes_json must be a JSON string array")
+
+        hyperparams: dict = {}
+        if hyperparams_json:
+            try:
+                parsed = json.loads(hyperparams_json)
+            except json.JSONDecodeError as exc:
+                raise HTTPException(status_code=400, detail="Invalid hyperparams_json payload") from exc
+            if not isinstance(parsed, dict):
+                raise HTTPException(status_code=400, detail="hyperparams_json must be a JSON object")
+            hyperparams = parsed
 
         job_id = datetime.now(UTC).strftime("%Y%m%d%H%M%S%f")
         job_dir = TRAIN_JOBS_DIR / job_id
@@ -165,12 +251,16 @@ class TrainingService:
                 "batch": batch,
                 "workers": workers,
                 "device": device or "auto",
+                "provider": provider,
                 "split": {
                     "train_percent": train_percent,
                     "val_percent": val_percent,
                     "test_percent": test_percent,
                 },
                 "classes": classes,
+                "hyperparams": hyperparams,
+                "external_callback_url": external_callback_url,
+                "external_callback_secret": external_callback_secret,
             }
             cls._write_json(config_path, config)
 
@@ -181,6 +271,7 @@ class TrainingService:
                 "output_model_name": output_model_name,
                 "produced_model_name": None,
                 "base_model": base_model,
+                "provider": provider,
                 "status": "queued",
                 "epochs": epochs,
                 "imgsz": imgsz,
@@ -199,8 +290,20 @@ class TrainingService:
                 "metrics": None,
                 "error": None,
                 "artifacts": None,
+                "current_epoch": None,
+                "total_epochs": epochs,
+                "runpod_endpoint_id": None,
+                "runpod_job_id": None,
             }
             cls._write_metadata(job_dir, metadata)
+
+            if provider == "runpod":
+                await runpod_training.start_cloud_job(job_id, job_dir, config)
+                metadata = cls._read_metadata(job_dir) or metadata
+                metadata["status"] = "running"
+                metadata["started_at"] = metadata.get("started_at") or now_iso()
+                cls._write_metadata(job_dir, metadata)
+                return cls.get_job(job_id)
 
             command = [
                 sys.executable,
@@ -272,27 +375,65 @@ class TrainingService:
         )
 
     @classmethod
-    def cancel_job(cls, job_id: str) -> TrainingJobDetail:
+    async def cancel_job(cls, job_id: str) -> TrainingJobDetail:
         job = cls.get_job(job_id)
         if job.status in {"completed", "failed", "cancelled", "interrupted"}:
             return job
+
+        job_dir = TRAIN_JOBS_DIR / job_id
+        callback_url, callback_secret = training_callback.load_callback_settings(job_dir / "config.json")
+
+        if job.provider == "runpod":
+            metadata = cls._read_metadata(job_dir) or {}
+            metadata["status"] = "cancelling"
+            metadata["error"] = "Cancellation requested"
+            cls._write_metadata(job_dir, metadata)
+            training_callback.post_progress_async(
+                callback_url, callback_secret, {"status": "cancelling", "error": metadata["error"]}
+            )
+
+            await runpod_training.cancel_cloud_job(job_id)
+
+            metadata = cls._read_metadata(job_dir) or metadata
+            if metadata.get("status") == "cancelling":
+                metadata["status"] = "cancelled"
+                metadata["completed_at"] = now_iso()
+                cls._write_metadata(job_dir, metadata)
+                training_callback.post_progress_async(
+                    callback_url,
+                    callback_secret,
+                    {"status": "cancelled", "completed_at": metadata["completed_at"]},
+                )
+            return cls.get_job(job_id)
 
         with cls._lock:
             process = cls._processes.get(job_id)
 
         if process is None:
-            metadata = cls._read_metadata(TRAIN_JOBS_DIR / job_id)
+            metadata = cls._read_metadata(job_dir)
             if metadata:
                 metadata["status"] = "interrupted"
                 metadata["completed_at"] = now_iso()
                 metadata["error"] = metadata.get("error") or "Training process is no longer active"
-                cls._write_metadata(TRAIN_JOBS_DIR / job_id, metadata)
+                cls._write_metadata(job_dir, metadata)
+                training_callback.post_progress_async(
+                    callback_url,
+                    callback_secret,
+                    {
+                        "status": "interrupted",
+                        "completed_at": metadata["completed_at"],
+                        "error": metadata["error"],
+                    },
+                )
             return cls.get_job(job_id)
 
-        metadata = cls._read_metadata(TRAIN_JOBS_DIR / job_id) or {}
+        metadata = cls._read_metadata(job_dir) or {}
         metadata["status"] = "cancelling"
         metadata["error"] = "Cancellation requested"
-        cls._write_metadata(TRAIN_JOBS_DIR / job_id, metadata)
+        cls._write_metadata(job_dir, metadata)
+        training_callback.post_progress_async(
+            callback_url, callback_secret, {"status": "cancelling", "error": metadata["error"]}
+        )
 
         process.terminate()
         return cls.get_job(job_id)
@@ -302,8 +443,12 @@ class TrainingService:
         return cls._read_metadata(TRAIN_JOBS_DIR / job_id) is not None
 
     @classmethod
-    def list_devices(cls) -> list[DeviceInfo]:
-        return _list_devices()
+    def list_devices(cls, provider: Optional[str] = None) -> list[DeviceInfo]:
+        if provider == "local":
+            return _list_local_devices()
+        if provider == "runpod":
+            return _list_runpod_devices()
+        return _list_local_devices() + _list_runpod_devices()
 
     @classmethod
     def read_full_logs(cls, job_id: str) -> str:
@@ -374,6 +519,19 @@ class TrainingService:
             metadata["error"] = error_payload.get("error") or "Training job failed"
 
         cls._write_metadata(job_dir, metadata)
+
+        callback_url, callback_secret = training_callback.load_callback_settings(job_dir / "config.json")
+        training_callback.post_progress(
+            callback_url,
+            callback_secret,
+            {
+                "status": metadata["status"],
+                "completed_at": metadata["completed_at"],
+                "produced_model_name": metadata.get("produced_model_name"),
+                "metrics": metadata.get("metrics"),
+                "error": metadata.get("error"),
+            },
+        )
 
     @classmethod
     def _resolve_dataset_root(cls, dataset_dir: Path) -> Path:

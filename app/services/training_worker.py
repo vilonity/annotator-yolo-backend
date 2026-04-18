@@ -3,12 +3,22 @@ import csv
 import json
 import shutil
 import sys
+import threading
+import time
 import traceback
+from datetime import datetime, UTC
 from pathlib import Path
 
 from ultralytics import YOLO
 
 from app.config import YOLO_MODELS_DIR
+from app.services import training_callback
+from app.services.resource_sampler import ResourceSampler
+
+
+_RESERVED_TRAIN_ARGS = frozenset(
+    {"data", "project", "name", "exist_ok", "epochs", "imgsz", "batch", "workers", "device", "verbose"}
+)
 
 
 def main() -> int:
@@ -21,9 +31,46 @@ def main() -> int:
     metrics_path = job_dir / "metrics.json"
     artifacts_path = job_dir / "artifacts.json"
     error_path = job_dir / "error.json"
+    logs_path = job_dir / "logs.txt"
 
     with config_path.open("r", encoding="utf-8") as config_file:
         config = json.load(config_file)
+
+    callback_url = config.get("external_callback_url")
+    callback_secret = config.get("external_callback_secret")
+
+    log_streamer_stop = threading.Event()
+    log_streamer = None
+    if callback_url and callback_secret:
+        log_streamer = threading.Thread(
+            target=_stream_logs_to_callback,
+            args=(logs_path, callback_url, callback_secret, log_streamer_stop),
+            daemon=True,
+        )
+        log_streamer.start()
+
+    training_callback.post_progress(
+        callback_url,
+        callback_secret,
+        {"status": "running", "started_at": _now_iso()},
+    )
+
+    resources_path = job_dir / "resources.jsonl"
+
+    def _on_resource_sample(sample: dict) -> None:
+        try:
+            with resources_path.open("a", encoding="utf-8") as fh:
+                fh.write(json.dumps(sample, ensure_ascii=True) + "\n")
+        except OSError as exc:
+            print(f"[training-resources] append error: {exc}", flush=True)
+        training_callback.post_progress_async(
+            callback_url,
+            callback_secret,
+            {"status": "running", "resources": sample},
+        )
+
+    resource_sampler = ResourceSampler(_on_resource_sample, interval=5.0)
+    resource_sampler.start()
 
     dataset_dir = job_dir / "dataset"
     data_yaml_path = dataset_dir / "data.yaml"
@@ -35,12 +82,28 @@ def main() -> int:
         print(f"[training] loading model: {base_model}", flush=True)
         model = YOLO(base_model)
 
+        total_epochs = int(config["epochs"])
+
+        def _on_train_epoch_end(trainer) -> None:  # type: ignore[no-untyped-def]
+            try:
+                epoch = int(getattr(trainer, "epoch", 0)) + 1
+            except Exception:  # noqa: BLE001
+                return
+            update_metadata_progress(job_dir, current_epoch=epoch, total_epochs=total_epochs)
+            training_callback.post_progress(
+                callback_url,
+                callback_secret,
+                {"status": "running", "current_epoch": epoch, "total_epochs": total_epochs},
+            )
+
+        model.add_callback("on_train_epoch_end", _on_train_epoch_end)
+
         train_args: dict[str, object] = {
             "data": str(data_yaml_path),
             "project": str(runs_dir),
             "name": "train",
             "exist_ok": True,
-            "epochs": int(config["epochs"]),
+            "epochs": total_epochs,
             "imgsz": int(config.get("imgsz") or 640),
             "batch": int(config.get("batch") or 16),
             "workers": int(config["workers"]) if config.get("workers") is not None else 8,
@@ -49,6 +112,15 @@ def main() -> int:
 
         if config.get("device") and config["device"] != "auto":
             train_args["device"] = config["device"]
+
+        hyperparams = config.get("hyperparams") or {}
+        if isinstance(hyperparams, dict) and hyperparams:
+            for key, value in hyperparams.items():
+                if key in _RESERVED_TRAIN_ARGS:
+                    continue
+                if value is None:
+                    continue
+                train_args[key] = value
 
         print(f"[training] args: {json.dumps(train_args, default=str)}", flush=True)
         results = model.train(**train_args)
@@ -91,20 +163,170 @@ def main() -> int:
         if any(value is None for value in metrics.values()):
             print(f"[training] WARNING: some metrics are null after normalization: {metrics}", flush=True)
 
+        results_save_dir = Path(getattr(results, "save_dir", "") or runs_dir / "train")
+        results_csv_path = results_save_dir / "results.csv"
         artifacts = {
             "best_weights_path": str(registered_weights),
-            "results_csv_path": str(Path(results.save_dir) / "results.csv"),
+            "results_csv_path": str(results_csv_path),
         }
         with artifacts_path.open("w", encoding="utf-8") as artifacts_file:
             json.dump(artifacts, artifacts_file, ensure_ascii=True, indent=2)
 
         print(f"[training] registered model at {registered_weights}", flush=True)
+
+        resource_sampler.stop()
+
+        log_streamer_stop.set()
+        if log_streamer:
+            log_streamer.join(timeout=3)
+        _flush_remaining_logs(logs_path, callback_url, callback_secret)
+
+        progress_ok = training_callback.post_progress(
+            callback_url,
+            callback_secret,
+            {
+                "status": "completed",
+                "completed_at": _now_iso(),
+                "produced_model_name": config["output_model_name"],
+                "current_epoch": total_epochs,
+                "total_epochs": total_epochs,
+                "metrics": metrics,
+            },
+        )
+
+        artifacts_ok = _upload_artifacts(
+            callback_url,
+            callback_secret,
+            registered_weights=registered_weights,
+            results_save_dir=results_save_dir,
+        )
+
+        if progress_ok and artifacts_ok:
+            shutil.rmtree(job_dir, ignore_errors=True)
+            print(f"[training] cleaned up {job_dir}", flush=True)
+        else:
+            print(
+                f"[training] keeping {job_dir} (callback/artifact upload incomplete)",
+                flush=True,
+            )
+
         return 0
     except Exception as exc:  # noqa: BLE001
         with error_path.open("w", encoding="utf-8") as error_file:
             json.dump({"error": str(exc)}, error_file, ensure_ascii=True, indent=2)
         traceback.print_exc()
+
+        resource_sampler.stop()
+
+        log_streamer_stop.set()
+        if log_streamer:
+            log_streamer.join(timeout=3)
+        _flush_remaining_logs(logs_path, callback_url, callback_secret)
+
+        training_callback.post_progress(
+            callback_url,
+            callback_secret,
+            {
+                "status": "failed",
+                "completed_at": _now_iso(),
+                "error": str(exc),
+            },
+        )
         return 1
+    finally:
+        log_streamer_stop.set()
+        resource_sampler.stop()
+
+
+def _stream_logs_to_callback(
+    logs_path: Path,
+    callback_url: str,
+    callback_secret: str,
+    stop_event: threading.Event,
+    poll_seconds: float = 1.5,
+) -> None:
+    position = 0
+    while not stop_event.is_set():
+        try:
+            if logs_path.exists():
+                with logs_path.open("rb") as fh:
+                    fh.seek(position)
+                    chunk = fh.read()
+                    position = fh.tell()
+                if chunk:
+                    training_callback.post_log_chunk(
+                        callback_url, callback_secret, chunk.decode("utf-8", errors="replace")
+                    )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[training-logs] streaming error: {exc}", flush=True)
+        if stop_event.wait(poll_seconds):
+            return
+
+
+def _flush_remaining_logs(logs_path: Path, callback_url, callback_secret) -> None:
+    if not callback_url or not callback_secret or not logs_path.exists():
+        return
+    try:
+        with logs_path.open("r", encoding="utf-8", errors="replace") as fh:
+            full = fh.read()
+        if full:
+            training_callback.post_log_chunk(callback_url, callback_secret, full)
+    except OSError as exc:
+        print(f"[training-logs] flush error: {exc}", flush=True)
+
+
+def _upload_artifacts(
+    callback_url,
+    callback_secret,
+    *,
+    registered_weights: Path,
+    results_save_dir: Path,
+) -> bool:
+    if not callback_url or not callback_secret:
+        return True
+
+    uploads: list[tuple[str, Path]] = [("weights.pt", registered_weights)]
+
+    plot_filenames = [
+        "results.png",
+        "confusion_matrix.png",
+        "confusion_matrix_normalized.png",
+        "PR_curve.png",
+        "F1_curve.png",
+        "P_curve.png",
+        "R_curve.png",
+        "results.csv",
+    ]
+    for filename in plot_filenames:
+        candidate = results_save_dir / filename
+        if candidate.exists():
+            uploads.append((filename, candidate))
+
+    all_ok = True
+    for filename, path in uploads:
+        ok = training_callback.put_artifact(callback_url, callback_secret, filename, path)
+        all_ok = all_ok and ok
+    return all_ok
+
+
+def update_metadata_progress(job_dir: Path, *, current_epoch: int, total_epochs: int) -> None:
+    """Merge epoch progress into metadata.json so the UI progress bar ticks up."""
+    metadata_path = job_dir / "metadata.json"
+    if not metadata_path.exists():
+        return
+    try:
+        with metadata_path.open("r", encoding="utf-8") as source:
+            metadata = json.load(source)
+    except (OSError, json.JSONDecodeError):
+        return
+
+    metadata["current_epoch"] = current_epoch
+    metadata["total_epochs"] = total_epochs
+
+    tmp_path = metadata_path.with_suffix(".json.tmp")
+    with tmp_path.open("w", encoding="utf-8") as target:
+        json.dump(metadata, target, ensure_ascii=True, indent=2)
+    tmp_path.replace(metadata_path)
 
 
 def resolve_base_model(base_model: str) -> str:
@@ -190,6 +412,10 @@ def safe_float(value) -> float | None:
         return float(value)
     except (TypeError, ValueError):
         return None
+
+
+def _now_iso() -> str:
+    return datetime.now(UTC).isoformat()
 
 
 if __name__ == "__main__":

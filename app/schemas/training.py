@@ -12,6 +12,8 @@ TrainingJobStatus = Literal[
     "interrupted",
 ]
 
+TrainingProvider = Literal["local", "runpod"]
+
 
 class SplitConfig(BaseModel):
     train_percent: int
@@ -39,6 +41,7 @@ class TrainingJobSummary(BaseModel):
     produced_model_name: Optional[str] = None
     base_model: str
     status: TrainingJobStatus
+    provider: TrainingProvider = "local"
     epochs: int
     imgsz: Optional[int] = None
     batch: Optional[int] = None
@@ -56,6 +59,10 @@ class TrainingJobSummary(BaseModel):
     metrics: Optional[TrainingMetricsSummary] = None
     error: Optional[str] = None
     artifacts: Optional[TrainingArtifacts] = None
+    current_epoch: Optional[int] = None
+    total_epochs: Optional[int] = None
+    runpod_endpoint_id: Optional[str] = None
+    runpod_job_id: Optional[str] = None
 
 
 class TrainingJobDetail(TrainingJobSummary):
@@ -65,6 +72,11 @@ class TrainingJobDetail(TrainingJobSummary):
 class DeviceInfo(BaseModel):
     id: str
     name: str
+    provider: TrainingProvider = "local"
+    vram_gb: Optional[int] = None
+    ram_gb: Optional[int] = None
+    vcpus: Optional[int] = None
+    price_per_hour_usd: Optional[float] = None
 
 
 class DevicesResponse(BaseModel):

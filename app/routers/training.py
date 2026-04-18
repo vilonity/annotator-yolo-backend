@@ -5,6 +5,7 @@ from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 
 from app.config import TRAIN_JOBS_DIR
 from app.schemas.training import DevicesResponse, TrainingJobDetail, TrainingJobSummary
+from app.services import runpod_training
 from app.services.training_service import TrainingService
 
 ARTIFACT_MEDIA_TYPES: dict[str, str] = {
@@ -22,8 +23,14 @@ router = APIRouter(prefix="/training", tags=["training"])
 
 
 @router.get("/devices", response_model=DevicesResponse)
-def list_training_devices():
-    return DevicesResponse(devices=TrainingService.list_devices())
+def list_training_devices(provider: Optional[str] = None):
+    return DevicesResponse(devices=TrainingService.list_devices(provider=provider))
+
+
+@router.get("/runpod/diagnostics")
+def runpod_diagnostics() -> dict[str, object]:
+    missing = runpod_training.diagnose_runpod_availability()
+    return {"ready": not missing, "missing": missing}
 
 
 @router.post("/jobs", response_model=TrainingJobDetail)
@@ -45,6 +52,10 @@ async def start_training_job(
     batch: Optional[int] = Form(None),
     workers: Optional[int] = Form(None),
     device: Optional[str] = Form("auto"),
+    provider: Optional[str] = Form("local"),
+    external_callback_url: Optional[str] = Form(None),
+    external_callback_secret: Optional[str] = Form(None),
+    hyperparams_json: Optional[str] = Form(None),
 ):
     return await TrainingService.start_job(
         dataset_file=dataset_file,
@@ -57,6 +68,7 @@ async def start_training_job(
         batch=batch,
         workers=workers,
         device=device,
+        provider=provider or "local",
         train_percent=train_percent,
         val_percent=val_percent,
         test_percent=test_percent,
@@ -64,6 +76,9 @@ async def start_training_job(
         boxed_images=boxed_images,
         empty_images=empty_images,
         classes_json=classes_json,
+        external_callback_url=external_callback_url,
+        external_callback_secret=external_callback_secret,
+        hyperparams_json=hyperparams_json,
     )
 
 
@@ -78,8 +93,8 @@ def get_training_job(job_id: str):
 
 
 @router.post("/jobs/{job_id}/cancel", response_model=TrainingJobDetail)
-def cancel_training_job(job_id: str):
-    return TrainingService.cancel_job(job_id)
+async def cancel_training_job(job_id: str):
+    return await TrainingService.cancel_job(job_id)
 
 
 @router.get("/jobs/{job_id}/logs", response_class=PlainTextResponse)

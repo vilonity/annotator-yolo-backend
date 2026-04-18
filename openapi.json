@@ -599,6 +599,24 @@
         ],
         "summary": "List Training Devices",
         "operationId": "list_training_devices_training_devices_get",
+        "parameters": [
+          {
+            "name": "provider",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Provider"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
@@ -606,6 +624,38 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/DevicesResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/training/runpod/diagnostics": {
+      "get": {
+        "tags": [
+          "training"
+        ],
+        "summary": "Runpod Diagnostics",
+        "operationId": "runpod_diagnostics_training_runpod_diagnostics_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "title": "Response Runpod Diagnostics Training Runpod Diagnostics Get"
                 }
               }
             }
@@ -1110,6 +1160,51 @@
             ],
             "title": "Device",
             "default": "auto"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider",
+            "default": "local"
+          },
+          "external_callback_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Callback Url"
+          },
+          "external_callback_secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Callback Secret"
+          },
+          "hyperparams_json": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hyperparams Json"
           }
         },
         "type": "object",
@@ -1202,6 +1297,59 @@
           "name": {
             "type": "string",
             "title": "Name"
+          },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "local",
+              "runpod"
+            ],
+            "title": "Provider",
+            "default": "local"
+          },
+          "vram_gb": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vram Gb"
+          },
+          "ram_gb": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ram Gb"
+          },
+          "vcpus": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Vcpus"
+          },
+          "price_per_hour_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Per Hour Usd"
           }
         },
         "type": "object",
@@ -1724,6 +1872,15 @@
             ],
             "title": "Status"
           },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "local",
+              "runpod"
+            ],
+            "title": "Provider",
+            "default": "local"
+          },
           "epochs": {
             "type": "integer",
             "title": "Epochs"
@@ -1861,6 +2018,50 @@
                 "type": "null"
               }
             ]
+          },
+          "current_epoch": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Epoch"
+          },
+          "total_epochs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Epochs"
+          },
+          "runpod_endpoint_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runpod Endpoint Id"
+          },
+          "runpod_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runpod Job Id"
           },
           "logs_tail": {
             "items": {
@@ -1933,6 +2134,15 @@
             ],
             "title": "Status"
           },
+          "provider": {
+            "type": "string",
+            "enum": [
+              "local",
+              "runpod"
+            ],
+            "title": "Provider",
+            "default": "local"
+          },
           "epochs": {
             "type": "integer",
             "title": "Epochs"
@@ -2070,6 +2280,50 @@
                 "type": "null"
               }
             ]
+          },
+          "current_epoch": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Epoch"
+          },
+          "total_epochs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Epochs"
+          },
+          "runpod_endpoint_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runpod Endpoint Id"
+          },
+          "runpod_job_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Runpod Job Id"
           }
         },
         "type": "object",

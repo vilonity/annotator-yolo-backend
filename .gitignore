@@ -15,6 +15,7 @@ build/
 runs/
 train_jobs/
 *.pt
+.env
 
 
 
