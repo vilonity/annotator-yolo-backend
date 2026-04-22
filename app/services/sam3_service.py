@@ -1,11 +1,9 @@
 import json
 import shutil
-import base64
 from datetime import datetime
 from pathlib import Path
 from typing import List
 
-import cv2
 import numpy as np
 import requests
 from fastapi import HTTPException, UploadFile
@@ -25,13 +23,27 @@ from app.schemas.sam3 import (
     Sam3ConceptBatchResponse,
     Sam3ConceptBatchResultItem,
 )
-from app.services.image_service import load_image_from_url
+from app.services.image_service import (
+    load_image_from_url,
+    mask_to_base64_png,
+    mask_to_polygon,
+    merge_overlapping_detections,
+)
 
 
-def mask_to_base64_png(mask_tensor) -> str:
-    mask = mask_tensor.cpu().numpy().astype(np.uint8)
-    _, png_data = cv2.imencode('.png', mask * 255)
-    return base64.b64encode(png_data).decode('utf-8')
+def _collect_raw(result):
+    """Pull masks/boxes/confidences off an ultralytics Result in aligned order."""
+    masks = [m.cpu().numpy().astype(np.uint8) for m in result.masks.data]
+    if hasattr(result, "boxes") and result.boxes is not None:
+        boxes = result.boxes.xyxy.cpu().numpy().tolist()
+        if hasattr(result.boxes, "conf") and result.boxes.conf is not None:
+            confs = result.boxes.conf.cpu().numpy().tolist()
+        else:
+            confs = [1.0] * len(masks)
+    else:
+        boxes = [[0.0, 0.0, 0.0, 0.0]] * len(masks)
+        confs = [1.0] * len(masks)
+    return masks, boxes, confs
 
 
 class Sam3Service:
@@ -113,6 +125,12 @@ class Sam3Service:
                 mode="predict",
                 model=str(weights_path),
                 half=True,
+                save=False,
+                save_txt=False,
+                save_conf=False,
+                save_crop=False,
+                verbose=False,
+                imgsz=644,
             )
             predictor = SAM3SemanticPredictor(overrides=overrides)
         except Exception as exc:
@@ -249,35 +267,35 @@ class Sam3Service:
             if payload.prompt_type == "bbox":
                 if not payload.bboxes or len(payload.bboxes) != 4:
                     raise HTTPException(status_code=400, detail="bboxes must contain exactly 4 values [x1, y1, x2, y2]")
-                results = model(img, bboxes=payload.bboxes, retina_masks=True)
+                results = model(img, bboxes=payload.bboxes, retina_masks=True, save=False, verbose=False)
 
             elif payload.prompt_type == "point":
                 if not payload.points or len(payload.points) != 1 or len(payload.points[0]) != 2:
                     raise HTTPException(status_code=400, detail="points must contain exactly one point [x, y]")
                 if not payload.labels or len(payload.labels) != 1:
                     raise HTTPException(status_code=400, detail="labels must contain exactly one label")
-                results = model(img, points=payload.points[0], labels=payload.labels, retina_masks=True)
+                results = model(img, points=payload.points[0], labels=payload.labels, retina_masks=True, save=False, verbose=False)
 
             elif payload.prompt_type == "points":
                 if not payload.points:
                     raise HTTPException(status_code=400, detail="points list cannot be empty")
                 if not payload.labels or len(payload.labels) != len(payload.points):
                     raise HTTPException(status_code=400, detail="labels must have same length as points")
-                results = model(img, points=payload.points, labels=payload.labels, retina_masks=True)
+                results = model(img, points=payload.points, labels=payload.labels, retina_masks=True, save=False, verbose=False)
 
             elif payload.prompt_type == "points_per_object":
                 if not payload.points:
                     raise HTTPException(status_code=400, detail="points list cannot be empty")
                 if not payload.labels or len(payload.labels) != len(payload.points):
                     raise HTTPException(status_code=400, detail="labels must have same length as points")
-                results = model(img, points=[payload.points], labels=[payload.labels], retina_masks=True)
+                results = model(img, points=[payload.points], labels=[payload.labels], retina_masks=True, save=False, verbose=False)
 
             elif payload.prompt_type == "negative_points":
                 if not payload.points:
                     raise HTTPException(status_code=400, detail="points list cannot be empty")
                 if not payload.labels or len(payload.labels) != len(payload.points):
                     raise HTTPException(status_code=400, detail="labels must have same length as points")
-                results = model(img, points=[payload.points], labels=[payload.labels], retina_masks=True)
+                results = model(img, points=[payload.points], labels=[payload.labels], retina_masks=True, save=False, verbose=False)
 
             else:
                 raise HTTPException(status_code=400, detail="Invalid prompt_type")
@@ -296,14 +314,12 @@ class Sam3Service:
             result = results[0]
 
             if hasattr(result, 'masks') and result.masks is not None:
-                masks_list = [p.tolist() for p in result.masks.xy]
-                for mask_data in result.masks.data:
-                    mask_images_list.append(mask_to_base64_png(mask_data))
-
-            if hasattr(result, 'boxes') and result.boxes is not None:
-                boxes_list = result.boxes.xyxy.cpu().numpy().tolist()
-                if hasattr(result.boxes, 'conf') and result.boxes.conf is not None:
-                    confidences_list = result.boxes.conf.cpu().numpy().tolist()
+                raw_masks, raw_boxes, raw_confs = _collect_raw(result)
+                merged_masks, boxes_list, confidences_list = merge_overlapping_detections(
+                    raw_masks, raw_boxes, raw_confs,
+                )
+                masks_list = [mask_to_polygon(m) for m in merged_masks]
+                mask_images_list = [mask_to_base64_png(m) for m in merged_masks]
 
         return Sam3AnnotateResponse(
             masks=masks_list,
@@ -323,7 +339,7 @@ class Sam3Service:
 
         try:
             predictor.set_image(img)
-            results = predictor(text=payload.text_prompts, save=False, retina_masks=True)
+            results = predictor(text=payload.text_prompts, save=False, retina_masks=True, verbose=False, imgsz=644)
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"SAM3 concept segmentation failed: {exc}") from exc
 
@@ -333,26 +349,28 @@ class Sam3Service:
         prompt_indices_list = []
         mask_images_list = []
 
+        conf_threshold = payload.conf_threshold or 0.25
         if results and len(results) > 0:
             for prompt_idx, result in enumerate(results):
-                if hasattr(result, 'masks') and result.masks is not None:
-                    polygons = [p.tolist() for p in result.masks.xy]
-                    masks_list.extend(polygons)
-                    for mask_data in result.masks.data:
-                        mask_images_list.append(mask_to_base64_png(mask_data))
-
-                    if hasattr(result, 'boxes') and result.boxes is not None:
-                        bxs = result.boxes.xyxy.cpu().numpy().tolist()
-                        boxes_list.extend(bxs)
-
-                        if hasattr(result.boxes, 'conf') and result.boxes.conf is not None:
-                            confs = result.boxes.conf.cpu().numpy().tolist()
-                            confs = [c for c in confs if c >= (payload.conf_threshold or 0.25)]
-                            confidences_list.extend(confs)
-                        else:
-                            confidences_list.extend([1.0] * len(bxs))
-
-                    prompt_indices_list.extend([prompt_idx] * len(polygons))
+                if not (hasattr(result, 'masks') and result.masks is not None):
+                    continue
+                raw_masks, raw_boxes, raw_confs = _collect_raw(result)
+                filtered = [
+                    (m, b, c) for m, b, c in zip(raw_masks, raw_boxes, raw_confs)
+                    if c >= conf_threshold
+                ]
+                if not filtered:
+                    continue
+                fm, fb, fc = zip(*filtered)
+                merged_masks, merged_boxes, merged_confs = merge_overlapping_detections(
+                    list(fm), list(fb), list(fc),
+                )
+                for m, b, c in zip(merged_masks, merged_boxes, merged_confs):
+                    masks_list.append(mask_to_polygon(m))
+                    boxes_list.append(b)
+                    confidences_list.append(c)
+                    mask_images_list.append(mask_to_base64_png(m))
+                    prompt_indices_list.append(prompt_idx)
 
         return Sam3ConceptResponse(
             masks=masks_list,
@@ -375,7 +393,7 @@ class Sam3Service:
             try:
                 img = load_image_from_url(image_url)
                 predictor.set_image(img)
-                results = predictor(text=payload.text_prompts, save=False, retina_masks=True)
+                results = predictor(text=payload.text_prompts, save=False, retina_masks=True, verbose=False, imgsz=644)
             except Exception as exc:
                 results_list.append(Sam3ConceptBatchResultItem(
                     masks=[],
@@ -392,27 +410,28 @@ class Sam3Service:
             prompt_indices_list = []
             mask_images_list = []
 
+            conf_threshold = payload.conf_threshold or 0.25
             if results and len(results) > 0:
                 for prompt_idx, result in enumerate(results):
-                    if hasattr(result, 'masks') and result.masks is not None:
-                        polygons = [p.tolist() for p in result.masks.xy]
-                        mask_imgs = [mask_to_base64_png(m) for m in result.masks.data]
-
-                        if hasattr(result, 'boxes') and result.boxes is not None:
-                            bxs = result.boxes.xyxy.cpu().numpy().tolist()
-                            
-                            if hasattr(result.boxes, 'conf') and result.boxes.conf is not None:
-                                confs = result.boxes.conf.cpu().numpy().tolist()
-                            else:
-                                confs = [1.0] * len(bxs)
-
-                            for i, (polygon, box, conf, mask_img) in enumerate(zip(polygons, bxs, confs, mask_imgs)):
-                                if conf >= (payload.conf_threshold or 0.25):
-                                    masks_list.append(polygon)
-                                    boxes_list.append(box)
-                                    confidences_list.append(conf)
-                                    prompt_indices_list.append(prompt_idx)
-                                    mask_images_list.append(mask_img)
+                    if not (hasattr(result, 'masks') and result.masks is not None):
+                        continue
+                    raw_masks, raw_boxes, raw_confs = _collect_raw(result)
+                    filtered = [
+                        (m, b, c) for m, b, c in zip(raw_masks, raw_boxes, raw_confs)
+                        if c >= conf_threshold
+                    ]
+                    if not filtered:
+                        continue
+                    fm, fb, fc = zip(*filtered)
+                    merged_masks, merged_boxes, merged_confs = merge_overlapping_detections(
+                        list(fm), list(fb), list(fc),
+                    )
+                    for m, b, c in zip(merged_masks, merged_boxes, merged_confs):
+                        masks_list.append(mask_to_polygon(m))
+                        boxes_list.append(b)
+                        confidences_list.append(c)
+                        prompt_indices_list.append(prompt_idx)
+                        mask_images_list.append(mask_to_base64_png(m))
 
             results_list.append(Sam3ConceptBatchResultItem(
                 masks=masks_list,

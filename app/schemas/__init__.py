@@ -7,6 +7,12 @@ from .sam3 import (
     Sam3ConceptRequest,
     Sam3ConceptResponse,
 )
+from .sam2 import (
+    Sam2ModelInfo,
+    UploadSam2ModelResponse,
+    Sam2AnnotateRequest,
+    Sam2AnnotateResponse,
+)
 
 __all__ = [
     "YoloModelInfo",
@@ -19,4 +25,8 @@ __all__ = [
     "Sam3AnnotateResponse",
     "Sam3ConceptRequest",
     "Sam3ConceptResponse",
+    "Sam2ModelInfo",
+    "UploadSam2ModelResponse",
+    "Sam2AnnotateRequest",
+    "Sam2AnnotateResponse",
 ]

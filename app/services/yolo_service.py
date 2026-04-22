@@ -207,10 +207,13 @@ class YoloService:
                 if classes_file.exists():
                     with classes_file.open() as f:
                         classes = json.load(f)
+                    weights_files = list(model_dir.glob("weights.*"))
+                    size_bytes = weights_files[0].stat().st_size if weights_files else 0
                     models.append(YoloModelInfo(
                         name=model_dir.name,
                         classes=classes,
-                        date_add=datetime.fromtimestamp(model_dir.stat().st_mtime).isoformat()
+                        date_add=datetime.fromtimestamp(model_dir.stat().st_mtime).isoformat(),
+                        size_bytes=size_bytes,
                     ))
         return models
 

@@ -6,6 +6,7 @@ class YoloModelInfo(BaseModel):
     name: str
     classes: list[str]
     date_add: str
+    size_bytes: int
 
 
 class AutoAnnotateRequest(BaseModel):

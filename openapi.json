@@ -592,6 +592,198 @@
         }
       }
     },
+    "/sam2-models": {
+      "get": {
+        "tags": [
+          "sam2"
+        ],
+        "summary": "List Sam2 Models",
+        "operationId": "list_sam2_models_sam2_models_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/Sam2ModelInfo"
+                  },
+                  "type": "array",
+                  "title": "Response List Sam2 Models Sam2 Models Get"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": [
+          "sam2"
+        ],
+        "summary": "Upload Sam2 Model",
+        "operationId": "upload_sam2_model_sam2_models_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_sam2_model_sam2_models_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadSam2ModelResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sam2-models/download-from-huggingface": {
+      "post": {
+        "tags": [
+          "sam2"
+        ],
+        "summary": "Download Sam2 Model From Huggingface",
+        "operationId": "download_sam2_model_from_huggingface_sam2_models_download_from_huggingface_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DownloadSam2FromHuggingFaceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UploadSam2ModelResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sam2-models/{model_name}": {
+      "delete": {
+        "tags": [
+          "sam2"
+        ],
+        "summary": "Delete Sam2 Model",
+        "operationId": "delete_sam2_model_sam2_models__model_name__delete",
+        "parameters": [
+          {
+            "name": "model_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Model Name"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sam2-models/{model_name}/annotate": {
+      "post": {
+        "tags": [
+          "sam2"
+        ],
+        "summary": "Sam2 Annotate",
+        "operationId": "sam2_annotate_sam2_models__model_name__annotate_post",
+        "parameters": [
+          {
+            "name": "model_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Model Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Sam2AnnotateRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sam2AnnotateResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/training/devices": {
       "get": {
         "tags": [
@@ -1225,6 +1417,25 @@
         ],
         "title": "Body_start_training_job_training_jobs_post"
       },
+      "Body_upload_sam2_model_sam2_models_post": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "weights_file": {
+            "type": "string",
+            "format": "binary",
+            "title": "Weights File"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "weights_file"
+        ],
+        "title": "Body_upload_sam2_model_sam2_models_post"
+      },
       "Body_upload_sam3_model_sam3_models_post": {
         "properties": {
           "name": {
@@ -1375,6 +1586,40 @@
         ],
         "title": "DevicesResponse"
       },
+      "DownloadSam2FromHuggingFaceRequest": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "repo_id": {
+            "type": "string",
+            "title": "Repo Id",
+            "default": "Ultralytics/SAM2.1"
+          },
+          "filename": {
+            "type": "string",
+            "title": "Filename",
+            "default": "sam2.1_b.pt"
+          },
+          "token": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Token"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name"
+        ],
+        "title": "DownloadSam2FromHuggingFaceRequest"
+      },
       "DownloadSam3FromHuggingFaceRequest": {
         "properties": {
           "name": {
@@ -1421,6 +1666,143 @@
         },
         "type": "object",
         "title": "HTTPValidationError"
+      },
+      "Sam2AnnotateRequest": {
+        "properties": {
+          "image_url": {
+            "type": "string",
+            "title": "Image Url"
+          },
+          "prompt_type": {
+            "type": "string",
+            "enum": [
+              "bbox",
+              "point",
+              "points",
+              "points_per_object",
+              "negative_points"
+            ],
+            "title": "Prompt Type"
+          },
+          "bboxes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bboxes"
+          },
+          "points": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Points"
+          },
+          "labels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Labels"
+          }
+        },
+        "type": "object",
+        "required": [
+          "image_url",
+          "prompt_type"
+        ],
+        "title": "Sam2AnnotateRequest"
+      },
+      "Sam2AnnotateResponse": {
+        "properties": {
+          "masks": {
+            "items": {
+              "items": {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Masks"
+          },
+          "boxes": {
+            "items": {
+              "items": {
+                "type": "number"
+              },
+              "type": "array"
+            },
+            "type": "array",
+            "title": "Boxes"
+          },
+          "confidences": {
+            "items": {
+              "type": "number"
+            },
+            "type": "array",
+            "title": "Confidences"
+          },
+          "mask_images": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Mask Images"
+          }
+        },
+        "type": "object",
+        "required": [
+          "masks",
+          "boxes",
+          "confidences",
+          "mask_images"
+        ],
+        "title": "Sam2AnnotateResponse"
+      },
+      "Sam2ModelInfo": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "date_add": {
+            "type": "string",
+            "title": "Date Add"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "date_add"
+        ],
+        "title": "Sam2ModelInfo"
       },
       "Sam3AnnotateRequest": {
         "properties": {
@@ -2419,6 +2801,24 @@
         ],
         "title": "UploadModelResponse"
       },
+      "UploadSam2ModelResponse": {
+        "properties": {
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "message": {
+            "type": "string",
+            "title": "Message"
+          }
+        },
+        "type": "object",
+        "required": [
+          "name",
+          "message"
+        ],
+        "title": "UploadSam2ModelResponse"
+      },
       "UploadSam3ModelResponse": {
         "properties": {
           "name": {
@@ -2486,13 +2886,18 @@
           "date_add": {
             "type": "string",
             "title": "Date Add"
+          },
+          "size_bytes": {
+            "type": "integer",
+            "title": "Size Bytes"
           }
         },
         "type": "object",
         "required": [
           "name",
           "classes",
-          "date_add"
+          "date_add",
+          "size_bytes"
         ],
         "title": "YoloModelInfo"
       }

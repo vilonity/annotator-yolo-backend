@@ -21,6 +21,9 @@ YOLO_MODELS_DIR.mkdir(exist_ok=True)
 SAM3_MODELS_DIR = BASE_DIR / "sam3_models"
 SAM3_MODELS_DIR.mkdir(exist_ok=True)
 
+SAM2_MODELS_DIR = BASE_DIR / "sam2_models"
+SAM2_MODELS_DIR.mkdir(exist_ok=True)
+
 TRAIN_JOBS_DIR = BASE_DIR / "train_jobs"
 TRAIN_JOBS_DIR.mkdir(exist_ok=True)
 

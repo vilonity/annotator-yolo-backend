@@ -1,5 +1,7 @@
 yolo_models/
 sam3_models/
+sam2_models/
+.flash/
 certs/
 mkcert.exe
 __pycache__/
