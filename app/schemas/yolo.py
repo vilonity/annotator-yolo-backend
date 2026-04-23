@@ -24,3 +24,7 @@ class UploadModelResponse(BaseModel):
     name: str
     classes: list[str]
     message: str
+
+
+class RenameModelRequest(BaseModel):
+    new_name: str

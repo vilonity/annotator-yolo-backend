@@ -133,11 +133,15 @@ class YoloService:
 
     @classmethod
     def _ensure_new_model(cls, name: str) -> None:
-        if not name or "/" in name or "\\" in name or name in {".", ".."}:
-            raise HTTPException(status_code=400, detail="Invalid model name")
+        cls._validate_model_name(name)
         model_dir = YOLO_MODELS_DIR / name
         if model_dir.exists():
             raise HTTPException(status_code=400, detail="Model with this name already exists")
+
+    @classmethod
+    def _validate_model_name(cls, name: str) -> None:
+        if not name or "/" in name or "\\" in name or name in {".", ".."}:
+            raise HTTPException(status_code=400, detail="Invalid model name")
 
     @classmethod
     def _parse_classes_text(cls, raw_classes_text: str) -> List[str]:
@@ -225,6 +229,31 @@ class YoloService:
 
         cls._cache.pop(model_name, None)
         shutil.rmtree(model_dir)
+
+    @classmethod
+    def rename_model(cls, model_name: str, new_name: str) -> YoloModelInfo:
+        cls._validate_model_name(new_name)
+        source_dir = YOLO_MODELS_DIR / model_name
+        if not source_dir.exists():
+            raise HTTPException(status_code=404, detail="Model not found")
+        target_dir = YOLO_MODELS_DIR / new_name
+        if target_dir.exists():
+            raise HTTPException(status_code=400, detail="Model with this name already exists")
+
+        cls._cache.pop(model_name, None)
+        source_dir.rename(target_dir)
+
+        classes_file = target_dir / "classes.json"
+        with classes_file.open() as f:
+            classes = json.load(f)
+        weights_files = list(target_dir.glob("weights.*"))
+        size_bytes = weights_files[0].stat().st_size if weights_files else 0
+        return YoloModelInfo(
+            name=new_name,
+            classes=classes,
+            date_add=datetime.fromtimestamp(target_dir.stat().st_mtime).isoformat(),
+            size_bytes=size_bytes,
+        )
 
     @classmethod
     def run_inference(

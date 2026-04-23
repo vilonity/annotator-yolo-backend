@@ -7,6 +7,7 @@ from app.schemas.yolo import (
     YoloModelInfo,
     AutoAnnotateRequest,
     AutoAnnotateResponse,
+    RenameModelRequest,
     UploadModelResponse,
 )
 from app.services.yolo_service import YoloService
@@ -59,6 +60,11 @@ def download_yolo_model_classes(model_name: str):
 @router.delete("/{model_name}", status_code=204)
 def delete_yolo_model(model_name: str):
     YoloService.delete_model(model_name)
+
+
+@router.put("/{model_name}/rename", response_model=YoloModelInfo)
+def rename_yolo_model(model_name: str, payload: RenameModelRequest):
+    return YoloService.rename_model(model_name, payload.new_name)
 
 
 @router.post("/{model_name}/annotate", response_model=AutoAnnotateResponse)
