@@ -1,5 +1,6 @@
 import json
 import shutil
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import List
@@ -22,6 +23,8 @@ from app.schemas.sam3 import (
     Sam3ConceptBatchRequest,
     Sam3ConceptBatchResponse,
     Sam3ConceptBatchResultItem,
+    Sam3ModelStatusResponse,
+    Sam3WarmupResponse,
 )
 from app.services.image_service import (
     load_image_from_url,
@@ -138,6 +141,30 @@ class Sam3Service:
 
         cls._concept_cache[name] = predictor
         return predictor
+
+    @classmethod
+    def get_concept_status(cls, name: str) -> Sam3ModelStatusResponse:
+        normalized = cls._validate_model_name(name)
+        model_dir = SAM3_MODELS_DIR / normalized
+        if not model_dir.exists():
+            raise HTTPException(status_code=404, detail="SAM3 model not found")
+        if normalized in cls._concept_cache:
+            return Sam3ModelStatusResponse(model_name=normalized, loaded=True)
+        return Sam3ModelStatusResponse(model_name=normalized, loaded=False)
+
+    @classmethod
+    def warmup_concept(cls, name: str) -> Sam3WarmupResponse:
+        normalized = cls._validate_model_name(name)
+        was_cached = normalized in cls._concept_cache
+        start = time.perf_counter()
+        cls.get_concept_predictor(normalized)
+        elapsed_ms = int((time.perf_counter() - start) * 1000)
+        return Sam3WarmupResponse(
+            model_name=normalized,
+            loaded=True,
+            elapsed_ms=elapsed_ms,
+            was_cached=was_cached,
+        )
 
     @classmethod
     async def upload_model(

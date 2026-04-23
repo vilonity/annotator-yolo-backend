@@ -1,5 +1,5 @@
 from typing import Optional, Literal
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 
 class Sam3ModelInfo(BaseModel):
@@ -66,3 +66,19 @@ class Sam3ConceptBatchResultItem(BaseModel):
 
 class Sam3ConceptBatchResponse(BaseModel):
     results: list[Sam3ConceptBatchResultItem]
+
+
+class Sam3ModelStatusResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    model_name: str
+    loaded: bool
+
+
+class Sam3WarmupResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
+    model_name: str
+    loaded: bool
+    elapsed_ms: int
+    was_cached: bool

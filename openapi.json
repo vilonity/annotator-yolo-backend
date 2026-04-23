@@ -592,6 +592,90 @@
         }
       }
     },
+    "/sam3-models/{model_name}/status": {
+      "get": {
+        "tags": [
+          "sam3"
+        ],
+        "summary": "Sam3 Model Status",
+        "operationId": "sam3_model_status_sam3_models__model_name__status_get",
+        "parameters": [
+          {
+            "name": "model_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Model Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sam3ModelStatusResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/sam3-models/{model_name}/warmup": {
+      "post": {
+        "tags": [
+          "sam3"
+        ],
+        "summary": "Sam3 Model Warmup",
+        "operationId": "sam3_model_warmup_sam3_models__model_name__warmup_post",
+        "parameters": [
+          {
+            "name": "model_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Model Name"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Sam3WarmupResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/sam2-models": {
       "get": {
         "tags": [
@@ -2156,6 +2240,52 @@
           "date_add"
         ],
         "title": "Sam3ModelInfo"
+      },
+      "Sam3ModelStatusResponse": {
+        "properties": {
+          "model_name": {
+            "type": "string",
+            "title": "Model Name"
+          },
+          "loaded": {
+            "type": "boolean",
+            "title": "Loaded"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model_name",
+          "loaded"
+        ],
+        "title": "Sam3ModelStatusResponse"
+      },
+      "Sam3WarmupResponse": {
+        "properties": {
+          "model_name": {
+            "type": "string",
+            "title": "Model Name"
+          },
+          "loaded": {
+            "type": "boolean",
+            "title": "Loaded"
+          },
+          "elapsed_ms": {
+            "type": "integer",
+            "title": "Elapsed Ms"
+          },
+          "was_cached": {
+            "type": "boolean",
+            "title": "Was Cached"
+          }
+        },
+        "type": "object",
+        "required": [
+          "model_name",
+          "loaded",
+          "elapsed_ms",
+          "was_cached"
+        ],
+        "title": "Sam3WarmupResponse"
       },
       "SplitConfig": {
         "properties": {

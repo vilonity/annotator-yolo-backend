@@ -12,6 +12,8 @@ from app.schemas.sam3 import (
     Sam3ConceptResponse,
     Sam3ConceptBatchRequest,
     Sam3ConceptBatchResponse,
+    Sam3ModelStatusResponse,
+    Sam3WarmupResponse,
 )
 from app.services.sam3_service import Sam3Service
 
@@ -63,3 +65,13 @@ async def sam3_concept_batch(
     payload: Sam3ConceptBatchRequest,
 ):
     return Sam3Service.concept_batch(model_name, payload)
+
+
+@router.get("/{model_name}/status", response_model=Sam3ModelStatusResponse)
+def sam3_model_status(model_name: str):
+    return Sam3Service.get_concept_status(model_name)
+
+
+@router.post("/{model_name}/warmup", response_model=Sam3WarmupResponse)
+def sam3_model_warmup(model_name: str):
+    return Sam3Service.warmup_concept(model_name)
