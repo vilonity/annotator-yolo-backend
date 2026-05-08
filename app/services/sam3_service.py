@@ -1,5 +1,6 @@
 import json
 import shutil
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -34,6 +35,9 @@ from app.services.image_service import (
 )
 
 
+_concept_predictor_lock = threading.Lock()
+
+
 def _collect_raw(result):
     """Pull masks/boxes/confidences off an ultralytics Result in aligned order."""
     masks = [m.cpu().numpy().astype(np.uint8) for m in result.masks.data]
@@ -47,6 +51,53 @@ def _collect_raw(result):
         boxes = [[0.0, 0.0, 0.0, 0.0]] * len(masks)
         confs = [1.0] * len(masks)
     return masks, boxes, confs
+
+
+def _prepare_concept_prompts(text_prompts: list[str], visual_bboxes: list[list[float]] | None):
+    prompts = [p.strip() for p in text_prompts if p.strip()]
+    if visual_bboxes:
+        # Ultralytics SAM3 treats geometric prompts as a single visual concept.
+        # If text is also provided, keep one text prompt as an additional concept hint.
+        return prompts[:1] or None
+    return prompts
+
+
+def _validate_visual_prompts(visual_bboxes: list[list[float]] | None, visual_labels: list[int] | None):
+    if not visual_bboxes:
+        return None, None
+    for bbox in visual_bboxes:
+        if len(bbox) != 4:
+            raise HTTPException(status_code=400, detail="visual_bboxes must contain [x1, y1, x2, y2] boxes")
+    labels = visual_labels or [1] * len(visual_bboxes)
+    if len(labels) != len(visual_bboxes):
+        raise HTTPException(status_code=400, detail="visual_labels must match visual_bboxes length")
+    return visual_bboxes, labels
+
+
+def _run_concept_inference(
+    predictor: SAM3SemanticPredictor,
+    img,
+    text_prompts: list[str] | None,
+    visual_bboxes: list[list[float]] | None,
+    visual_labels: list[int] | None,
+):
+    with _concept_predictor_lock:
+        predictor.prompts = {}
+        predictor.reset_image()
+        try:
+            predictor.set_image(img)
+            return predictor(
+                text=text_prompts,
+                bboxes=visual_bboxes,
+                labels=visual_labels,
+                save=False,
+                retina_masks=True,
+                verbose=False,
+                imgsz=644,
+            )
+        finally:
+            predictor.prompts = {}
+            predictor.reset_image()
 
 
 class Sam3Service:
@@ -363,10 +414,14 @@ class Sam3Service:
     ) -> Sam3ConceptResponse:
         predictor = cls.get_concept_predictor(model_name)
         img = load_image_from_url(payload.image_url)
+        visual_bboxes, visual_labels = _validate_visual_prompts(payload.visual_bboxes, payload.visual_labels)
+        text_prompts = _prepare_concept_prompts(payload.text_prompts, visual_bboxes)
+
+        if not text_prompts and not visual_bboxes:
+            raise HTTPException(status_code=400, detail="text_prompts or visual_bboxes is required")
 
         try:
-            predictor.set_image(img)
-            results = predictor(text=payload.text_prompts, save=False, retina_masks=True, verbose=False, imgsz=644)
+            results = _run_concept_inference(predictor, img, text_prompts, visual_bboxes, visual_labels)
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"SAM3 concept segmentation failed: {exc}") from exc
 
@@ -415,12 +470,16 @@ class Sam3Service:
     ) -> Sam3ConceptBatchResponse:
         predictor = cls.get_concept_predictor(model_name)
         results_list = []
+        visual_bboxes, visual_labels = _validate_visual_prompts(payload.visual_bboxes, payload.visual_labels)
+        text_prompts = _prepare_concept_prompts(payload.text_prompts, visual_bboxes)
+
+        if not text_prompts and not visual_bboxes:
+            raise HTTPException(status_code=400, detail="text_prompts or visual_bboxes is required")
 
         for image_url in payload.image_urls:
             try:
                 img = load_image_from_url(image_url)
-                predictor.set_image(img)
-                results = predictor(text=payload.text_prompts, save=False, retina_masks=True, verbose=False, imgsz=644)
+                results = _run_concept_inference(predictor, img, text_prompts, visual_bboxes, visual_labels)
             except Exception as exc:
                 results_list.append(Sam3ConceptBatchResultItem(
                     masks=[],

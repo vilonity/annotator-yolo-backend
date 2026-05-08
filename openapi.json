@@ -244,6 +244,58 @@
         }
       }
     },
+    "/yolo-models/{model_name}/rename": {
+      "put": {
+        "tags": [
+          "yolo"
+        ],
+        "summary": "Rename Yolo Model",
+        "operationId": "rename_yolo_model_yolo_models__model_name__rename_put",
+        "parameters": [
+          {
+            "name": "model_name",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Model Name"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenameModelRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/YoloModelInfo"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/yolo-models/{model_name}/annotate": {
       "post": {
         "tags": [
@@ -1751,6 +1803,19 @@
         "type": "object",
         "title": "HTTPValidationError"
       },
+      "RenameModelRequest": {
+        "properties": {
+          "new_name": {
+            "type": "string",
+            "title": "New Name"
+          }
+        },
+        "type": "object",
+        "required": [
+          "new_name"
+        ],
+        "title": "RenameModelRequest"
+      },
       "Sam2AnnotateRequest": {
         "properties": {
           "image_url": {
@@ -2021,7 +2086,39 @@
               "type": "string"
             },
             "type": "array",
-            "title": "Text Prompts"
+            "title": "Text Prompts",
+            "default": []
+          },
+          "visual_bboxes": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visual Bboxes"
+          },
+          "visual_labels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visual Labels"
           },
           "conf_threshold": {
             "anyOf": [
@@ -2055,7 +2152,6 @@
         "type": "object",
         "required": [
           "image_urls",
-          "text_prompts",
           "class_name"
         ],
         "title": "Sam3ConceptBatchRequest"
@@ -2144,7 +2240,39 @@
               "type": "string"
             },
             "type": "array",
-            "title": "Text Prompts"
+            "title": "Text Prompts",
+            "default": []
+          },
+          "visual_bboxes": {
+            "anyOf": [
+              {
+                "items": {
+                  "items": {
+                    "type": "number"
+                  },
+                  "type": "array"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visual Bboxes"
+          },
+          "visual_labels": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "integer"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Visual Labels"
           },
           "conf_threshold": {
             "anyOf": [
@@ -2161,8 +2289,7 @@
         },
         "type": "object",
         "required": [
-          "image_url",
-          "text_prompts"
+          "image_url"
         ],
         "title": "Sam3ConceptRequest"
       },

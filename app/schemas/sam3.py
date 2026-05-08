@@ -36,7 +36,9 @@ class Sam3AnnotateResponse(BaseModel):
 
 class Sam3ConceptRequest(BaseModel):
     image_url: str
-    text_prompts: list[str]
+    text_prompts: list[str] = []
+    visual_bboxes: Optional[list[list[float]]] = None
+    visual_labels: Optional[list[int]] = None
     conf_threshold: Optional[float] = 0.25
 
 
@@ -50,7 +52,9 @@ class Sam3ConceptResponse(BaseModel):
 
 class Sam3ConceptBatchRequest(BaseModel):
     image_urls: list[str]
-    text_prompts: list[str]
+    text_prompts: list[str] = []
+    visual_bboxes: Optional[list[list[float]]] = None
+    visual_labels: Optional[list[int]] = None
     conf_threshold: Optional[float] = 0.25
     class_name: str
     skip_duplicates: Optional[bool] = False
