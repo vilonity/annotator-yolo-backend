@@ -35,6 +35,12 @@ def _env_bool(name: str, default: bool = False) -> bool:
     return raw.strip().lower() in {"1", "true", "yes", "on"}
 
 
+# Pull-mode worker: when both are set, this server long-polls the central Bun
+# API for training jobs and cancellations (outbound-only — works behind NAT).
+ANNOTATOR_API_URL: str | None = (os.getenv("ANNOTATOR_API_URL") or "").strip().rstrip("/") or None
+ANNOTATOR_WORKER_TOKEN: str | None = (os.getenv("ANNOTATOR_WORKER_TOKEN") or "").strip() or None
+ANNOTATOR_API_VERIFY_TLS: bool = _env_bool("ANNOTATOR_API_VERIFY_TLS", True)
+
 RUNPOD_ENABLED: bool = _env_bool("RUNPOD_ENABLED", False)
 RUNPOD_API_KEY: str | None = os.getenv("RUNPOD_API_KEY") or None
 RUNPOD_NETWORK_VOLUME_NAME: str = os.getenv("RUNPOD_NETWORK_VOLUME_NAME", "annotator-training-vol")

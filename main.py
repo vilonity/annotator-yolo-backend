@@ -6,11 +6,13 @@ from pathlib import Path
 
 from app.routers import health_router, yolo_router, sam3_router, sam2_router, training_router
 from app.services.training_service import TrainingService
+from app.services.worker_poller import start_worker_poller_if_configured
 
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     TrainingService.initialize()
+    start_worker_poller_if_configured()
     yield
 
 

@@ -159,7 +159,12 @@ class TrainingService:
     async def start_job(
         cls,
         *,
-        dataset_file: UploadFile,
+        dataset_file: Optional[UploadFile] = None,
+        # Pull-mode alternative to dataset_file: a zip already on local disk
+        # (downloaded by the worker poller), plus an explicit job id so the
+        # central API can address the job deterministically (remote-{bun_id}).
+        dataset_zip_source: Optional[Path] = None,
+        job_id: Optional[str] = None,
         user_id: str,
         project_name: str,
         output_model_name: str,
@@ -211,7 +216,10 @@ class TrainingService:
                 raise HTTPException(status_code=400, detail="hyperparams_json must be a JSON object")
             hyperparams = parsed
 
-        job_id = datetime.now(UTC).strftime("%Y%m%d%H%M%S%f")
+        if dataset_file is None and dataset_zip_source is None:
+            raise HTTPException(status_code=400, detail="Training dataset is required")
+
+        job_id = job_id or datetime.now(UTC).strftime("%Y%m%d%H%M%S%f")
         job_dir = TRAIN_JOBS_DIR / job_id
         dataset_zip_path = job_dir / "dataset.zip"
         dataset_dir = job_dir / "dataset"
@@ -223,8 +231,11 @@ class TrainingService:
         logs_path.touch()
 
         try:
-            with dataset_zip_path.open("wb") as zip_buffer:
-                shutil.copyfileobj(dataset_file.file, zip_buffer)
+            if dataset_file is not None:
+                with dataset_zip_path.open("wb") as zip_buffer:
+                    shutil.copyfileobj(dataset_file.file, zip_buffer)
+            else:
+                shutil.copyfile(dataset_zip_source, dataset_zip_path)
 
             try:
                 with zipfile.ZipFile(dataset_zip_path, "r") as archive:

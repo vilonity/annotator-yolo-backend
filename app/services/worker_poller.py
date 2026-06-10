@@ -1,0 +1,230 @@
+"""Pull-mode worker: long-polls the central Bun API for training work.
+
+The central server cannot reach this machine (NAT, no tunnels), so all
+traffic is outbound: this poller asks ``POST /api/worker/poll`` for queued
+training jobs and pending cancellations, downloads staged datasets, starts
+the regular local training pipeline, and lets the existing
+``training_callback`` machinery report progress/logs/artifacts back.
+
+Enabled when ``ANNOTATOR_API_URL`` and ``ANNOTATOR_WORKER_TOKEN`` are set
+(see ``app/config.py``); the token is generated per user in the web app's
+account settings.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import json
+import tempfile
+import threading
+import time
+from pathlib import Path
+from typing import Any, Optional
+
+try:
+    import requests
+except ImportError:  # pragma: no cover - requests is in requirements but guard for tooling
+    requests = None  # type: ignore[assignment]
+
+from app.config import ANNOTATOR_API_URL, ANNOTATOR_API_VERIFY_TLS, ANNOTATOR_WORKER_TOKEN, TRAIN_JOBS_DIR
+from app.services import training_callback
+from app.services.training_service import TrainingService, now_iso
+
+# The server holds a poll open for up to ~20s; give it headroom.
+POLL_TIMEOUT_SECONDS = 40.0
+DOWNLOAD_TIMEOUT_SECONDS = 600.0
+ERROR_BACKOFF_MIN_SECONDS = 5.0
+ERROR_BACKOFF_MAX_SECONDS = 60.0
+
+
+def remote_job_id(bun_job_id: int) -> str:
+    """Deterministic local job id for a job dispatched by the central API."""
+    return f"remote-{bun_job_id}"
+
+
+def _local_devices_payload() -> list[dict[str, Any]]:
+    try:
+        return [device.model_dump() for device in TrainingService.list_devices(provider="local")]
+    except Exception as exc:  # noqa: BLE001
+        print(f"[worker-poller] failed to collect devices: {exc}", flush=True)
+        return []
+
+
+class WorkerPoller:
+    def __init__(self, api_url: str, token: str, *, verify_tls: bool = True) -> None:
+        self._api_url = api_url.rstrip("/")
+        self._token = token
+        self._verify_tls = verify_tls
+        self._thread: Optional[threading.Thread] = None
+
+    # ── lifecycle ────────────────────────────────────────────────────
+
+    def start(self) -> None:
+        self._thread = threading.Thread(target=self._loop, name="worker-poller", daemon=True)
+        self._thread.start()
+        print(f"[worker-poller] polling {self._api_url} for training jobs", flush=True)
+
+    # ── poll loop ────────────────────────────────────────────────────
+
+    def _headers(self) -> dict[str, str]:
+        return {"Authorization": f"Bearer {self._token}"}
+
+    def _loop(self) -> None:
+        backoff = ERROR_BACKOFF_MIN_SECONDS
+        while True:
+            try:
+                response = requests.post(
+                    f"{self._api_url}/api/worker/poll",
+                    json={"devices": _local_devices_payload()},
+                    headers=self._headers(),
+                    timeout=POLL_TIMEOUT_SECONDS,
+                    verify=self._verify_tls,
+                )
+                if response.status_code == 401:
+                    print(
+                        "[worker-poller] worker token rejected (401) — regenerate it in account settings",
+                        flush=True,
+                    )
+                    time.sleep(ERROR_BACKOFF_MAX_SECONDS)
+                    continue
+                response.raise_for_status()
+                data = response.json()
+
+                for cancellation in data.get("cancellations") or []:
+                    self._handle_cancellation(cancellation)
+
+                job = data.get("job")
+                if job:
+                    self._handle_job(job)
+
+                backoff = ERROR_BACKOFF_MIN_SECONDS
+            except Exception as exc:  # noqa: BLE001
+                print(f"[worker-poller] poll error: {exc} (retry in {backoff:.0f}s)", flush=True)
+                time.sleep(backoff)
+                backoff = min(backoff * 2, ERROR_BACKOFF_MAX_SECONDS)
+
+    # ── cancellations ────────────────────────────────────────────────
+
+    def _handle_cancellation(self, cancellation: dict[str, Any]) -> None:
+        bun_job_id = cancellation.get("job_id")
+        if bun_job_id is None:
+            return
+        local_id = remote_job_id(bun_job_id)
+        try:
+            if TrainingService.has_job(local_id):
+                asyncio.run(TrainingService.cancel_job(local_id))
+                print(f"[worker-poller] cancellation forwarded to job {local_id}", flush=True)
+            else:
+                # The job never reached this machine (or its dir is gone) —
+                # finalize it on the server so it stops being redelivered.
+                training_callback.post_progress(
+                    cancellation.get("callback_url"),
+                    cancellation.get("callback_secret"),
+                    {
+                        "status": "cancelled",
+                        "completed_at": now_iso(),
+                        "error": "Training job was cancelled",
+                    },
+                )
+        except Exception as exc:  # noqa: BLE001
+            print(f"[worker-poller] cancel of {local_id} failed: {exc}", flush=True)
+
+    # ── job dispatch ─────────────────────────────────────────────────
+
+    def _download_dataset(self, dataset_path: str, target: Path) -> None:
+        with requests.get(
+            f"{self._api_url}{dataset_path}",
+            headers=self._headers(),
+            timeout=DOWNLOAD_TIMEOUT_SECONDS,
+            verify=self._verify_tls,
+            stream=True,
+        ) as response:
+            response.raise_for_status()
+            with target.open("wb") as fh:
+                for chunk in response.iter_content(chunk_size=1024 * 1024):
+                    if chunk:
+                        fh.write(chunk)
+
+    def _handle_job(self, job: dict[str, Any]) -> None:
+        local_id = remote_job_id(job["id"])
+        callback_url = job.get("callback_url")
+        callback_secret = job.get("callback_secret")
+
+        if TrainingService.has_job(local_id):
+            # Redelivery (e.g. the "running" callback was lost) — re-post the
+            # current state instead of double-starting the job.
+            metadata = TrainingService._read_metadata(TRAIN_JOBS_DIR / local_id)  # noqa: SLF001 - internal reuse
+            if metadata:
+                training_callback.post_progress(
+                    callback_url,
+                    callback_secret,
+                    {"status": metadata.get("status"), "started_at": metadata.get("started_at")},
+                )
+            print(f"[worker-poller] job {local_id} already exists — skipped duplicate dispatch", flush=True)
+            return
+
+        print(f"[worker-poller] claimed training job {local_id}", flush=True)
+        tmp_dir = tempfile.mkdtemp(prefix="annotator-worker-")
+        tmp_zip = Path(tmp_dir) / "dataset.zip"
+        try:
+            self._download_dataset(job["dataset_path"], tmp_zip)
+
+            hyperparams = job.get("hyperparams") or {}
+            split = job.get("split") or {}
+            detail = asyncio.run(
+                TrainingService.start_job(
+                    dataset_zip_source=tmp_zip,
+                    job_id=local_id,
+                    user_id=job["user_key"],
+                    project_name=job["project_name"],
+                    output_model_name=job["output_model_name"],
+                    base_model=job["base_model"],
+                    epochs=job["epochs"],
+                    imgsz=job.get("imgsz"),
+                    batch=job.get("batch"),
+                    workers=job.get("workers"),
+                    device=job.get("device") or "auto",
+                    provider="local",
+                    train_percent=split.get("train_percent", 0),
+                    val_percent=split.get("val_percent", 0),
+                    test_percent=split.get("test_percent", 0),
+                    total_images=job.get("total_images", 0),
+                    boxed_images=job.get("boxed_images", 0),
+                    empty_images=job.get("empty_images", 0),
+                    classes_json=json.dumps(job.get("classes") or []),
+                    external_callback_url=callback_url,
+                    external_callback_secret=callback_secret,
+                    hyperparams_json=json.dumps(hyperparams) if hyperparams else None,
+                )
+            )
+            # The spawned training process posts "running" itself; device_name
+            # is only known here, so sync it separately (no status override).
+            if detail.device_name:
+                training_callback.post_progress_async(
+                    callback_url, callback_secret, {"device_name": detail.device_name}
+                )
+        except Exception as exc:  # noqa: BLE001
+            detail_text = getattr(exc, "detail", None) or str(exc) or "Failed to start training job"
+            print(f"[worker-poller] failed to start job {local_id}: {detail_text}", flush=True)
+            training_callback.post_progress(
+                callback_url,
+                callback_secret,
+                {"status": "failed", "error": str(detail_text), "completed_at": now_iso()},
+            )
+        finally:
+            try:
+                tmp_zip.unlink(missing_ok=True)
+                Path(tmp_dir).rmdir()
+            except OSError:
+                pass
+
+
+def start_worker_poller_if_configured() -> Optional[WorkerPoller]:
+    if not ANNOTATOR_API_URL or not ANNOTATOR_WORKER_TOKEN:
+        return None
+    if requests is None:
+        print("[worker-poller] requests not installed — pull-mode worker disabled", flush=True)
+        return None
+    poller = WorkerPoller(ANNOTATOR_API_URL, ANNOTATOR_WORKER_TOKEN, verify_tls=ANNOTATOR_API_VERIFY_TLS)
+    poller.start()
+    return poller
