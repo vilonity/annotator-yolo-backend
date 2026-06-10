@@ -209,6 +209,7 @@ class WorkerPoller:
                     project_name=job["project_name"],
                     output_model_name=job["output_model_name"],
                     base_model=job["base_model"],
+                    architecture=job.get("architecture") or "yolo",
                     epochs=job["epochs"],
                     imgsz=job.get("imgsz"),
                     batch=job.get("batch"),

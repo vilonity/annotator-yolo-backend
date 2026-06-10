@@ -14,6 +14,8 @@ TrainingJobStatus = Literal[
 
 TrainingProvider = Literal["local", "runpod"]
 
+TrainingArchitecture = Literal["yolo", "rfdetr"]
+
 
 class SplitConfig(BaseModel):
     train_percent: int
@@ -40,6 +42,7 @@ class TrainingJobSummary(BaseModel):
     output_model_name: str
     produced_model_name: Optional[str] = None
     base_model: str
+    architecture: TrainingArchitecture = "yolo"
     status: TrainingJobStatus
     provider: TrainingProvider = "local"
     epochs: int

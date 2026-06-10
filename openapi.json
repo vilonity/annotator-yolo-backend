@@ -330,6 +330,314 @@
 				}
 			}
 		},
+		"/rfdetr-models": {
+			"get": {
+				"tags": ["rfdetr"],
+				"summary": "List Rfdetr Models",
+				"operationId": "list_rfdetr_models_rfdetr_models_get",
+				"responses": {
+					"200": {
+						"description": "Successful Response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"items": {
+										"$ref": "#/components/schemas/RfDetrModelInfo"
+									},
+									"type": "array",
+									"title": "Response List Rfdetr Models Rfdetr Models Get"
+								}
+							}
+						}
+					}
+				}
+			},
+			"post": {
+				"tags": ["rfdetr"],
+				"summary": "Upload Rfdetr Model",
+				"operationId": "upload_rfdetr_model_rfdetr_models_post",
+				"requestBody": {
+					"content": {
+						"multipart/form-data": {
+							"schema": {
+								"$ref": "#/components/schemas/Body_upload_rfdetr_model_rfdetr_models_post"
+							}
+						}
+					},
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"description": "Successful Response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/RfDetrUploadResponse"
+								}
+							}
+						}
+					},
+					"422": {
+						"description": "Validation Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/rfdetr-models/archive": {
+			"post": {
+				"tags": ["rfdetr"],
+				"summary": "Upload Rfdetr Model Archive",
+				"operationId": "upload_rfdetr_model_archive_rfdetr_models_archive_post",
+				"requestBody": {
+					"content": {
+						"multipart/form-data": {
+							"schema": {
+								"$ref": "#/components/schemas/Body_upload_rfdetr_model_archive_rfdetr_models_archive_post"
+							}
+						}
+					},
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"description": "Successful Response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/RfDetrUploadResponse"
+								}
+							}
+						}
+					},
+					"422": {
+						"description": "Validation Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/rfdetr-models/{model_name}/weights": {
+			"get": {
+				"tags": ["rfdetr"],
+				"summary": "Download Rfdetr Model Weights",
+				"operationId": "download_rfdetr_model_weights_rfdetr_models__model_name__weights_get",
+				"parameters": [
+					{
+						"name": "model_name",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"title": "Model Name"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Successful Response",
+						"content": {
+							"application/json": {
+								"schema": {}
+							}
+						}
+					},
+					"422": {
+						"description": "Validation Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/rfdetr-models/{model_name}/classes": {
+			"get": {
+				"tags": ["rfdetr"],
+				"summary": "Download Rfdetr Model Classes",
+				"operationId": "download_rfdetr_model_classes_rfdetr_models__model_name__classes_get",
+				"parameters": [
+					{
+						"name": "model_name",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"title": "Model Name"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Successful Response",
+						"content": {
+							"application/json": {
+								"schema": {}
+							}
+						}
+					},
+					"422": {
+						"description": "Validation Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/rfdetr-models/{model_name}": {
+			"delete": {
+				"tags": ["rfdetr"],
+				"summary": "Delete Rfdetr Model",
+				"operationId": "delete_rfdetr_model_rfdetr_models__model_name__delete",
+				"parameters": [
+					{
+						"name": "model_name",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"title": "Model Name"
+						}
+					}
+				],
+				"responses": {
+					"204": {
+						"description": "Successful Response"
+					},
+					"422": {
+						"description": "Validation Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/rfdetr-models/{model_name}/rename": {
+			"put": {
+				"tags": ["rfdetr"],
+				"summary": "Rename Rfdetr Model",
+				"operationId": "rename_rfdetr_model_rfdetr_models__model_name__rename_put",
+				"parameters": [
+					{
+						"name": "model_name",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"title": "Model Name"
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/RenameModelRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Successful Response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/RfDetrModelInfo"
+								}
+							}
+						}
+					},
+					"422": {
+						"description": "Validation Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/rfdetr-models/{model_name}/annotate": {
+			"post": {
+				"tags": ["rfdetr"],
+				"summary": "Auto Annotate Images Rfdetr",
+				"operationId": "auto_annotate_images_rfdetr_rfdetr_models__model_name__annotate_post",
+				"parameters": [
+					{
+						"name": "model_name",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"title": "Model Name"
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/RfDetrAnnotateRequest"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "Successful Response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/RfDetrAnnotateResponse"
+								}
+							}
+						}
+					},
+					"422": {
+						"description": "Validation Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/sam3-models": {
 			"get": {
 				"tags": ["sam3"],
@@ -1348,6 +1656,18 @@
 						"type": "integer",
 						"title": "Epochs"
 					},
+					"architecture": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Architecture",
+						"default": "yolo"
+					},
 					"train_percent": {
 						"type": "integer",
 						"title": "Train Percent"
@@ -1484,6 +1804,51 @@
 					"classes_json"
 				],
 				"title": "Body_start_training_job_training_jobs_post"
+			},
+			"Body_upload_rfdetr_model_archive_rfdetr_models_archive_post": {
+				"properties": {
+					"name": {
+						"type": "string",
+						"title": "Name"
+					},
+					"variant": {
+						"type": "string",
+						"title": "Variant"
+					},
+					"archive_file": {
+						"type": "string",
+						"format": "binary",
+						"title": "Archive File"
+					}
+				},
+				"type": "object",
+				"required": ["name", "variant", "archive_file"],
+				"title": "Body_upload_rfdetr_model_archive_rfdetr_models_archive_post"
+			},
+			"Body_upload_rfdetr_model_rfdetr_models_post": {
+				"properties": {
+					"name": {
+						"type": "string",
+						"title": "Name"
+					},
+					"variant": {
+						"type": "string",
+						"title": "Variant"
+					},
+					"weights_file": {
+						"type": "string",
+						"format": "binary",
+						"title": "Weights File"
+					},
+					"classes_file": {
+						"type": "string",
+						"format": "binary",
+						"title": "Classes File"
+					}
+				},
+				"type": "object",
+				"required": ["name", "variant", "weights_file", "classes_file"],
+				"title": "Body_upload_rfdetr_model_rfdetr_models_post"
 			},
 			"Body_upload_sam2_model_sam2_models_post": {
 				"properties": {
@@ -1720,6 +2085,121 @@
 				"type": "object",
 				"required": ["new_name"],
 				"title": "RenameModelRequest"
+			},
+			"RfDetrAnnotateRequest": {
+				"properties": {
+					"image_urls": {
+						"items": {
+							"type": "string"
+						},
+						"type": "array",
+						"title": "Image Urls"
+					},
+					"conf_threshold": {
+						"anyOf": [
+							{
+								"type": "number"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Conf Threshold",
+						"default": 0.5
+					},
+					"class_map": {
+						"anyOf": [
+							{
+								"additionalProperties": {
+									"type": "string"
+								},
+								"type": "object"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Class Map"
+					}
+				},
+				"type": "object",
+				"required": ["image_urls"],
+				"title": "RfDetrAnnotateRequest"
+			},
+			"RfDetrAnnotateResponse": {
+				"properties": {
+					"annotations": {
+						"items": {
+							"items": {
+								"type": "object"
+							},
+							"type": "array"
+						},
+						"type": "array",
+						"title": "Annotations"
+					}
+				},
+				"type": "object",
+				"required": ["annotations"],
+				"title": "RfDetrAnnotateResponse"
+			},
+			"RfDetrModelInfo": {
+				"properties": {
+					"name": {
+						"type": "string",
+						"title": "Name"
+					},
+					"classes": {
+						"items": {
+							"type": "string"
+						},
+						"type": "array",
+						"title": "Classes"
+					},
+					"variant": {
+						"type": "string",
+						"enum": ["nano", "small", "medium", "large"],
+						"title": "Variant"
+					},
+					"date_add": {
+						"type": "string",
+						"title": "Date Add"
+					},
+					"size_bytes": {
+						"type": "integer",
+						"title": "Size Bytes"
+					}
+				},
+				"type": "object",
+				"required": ["name", "classes", "variant", "date_add", "size_bytes"],
+				"title": "RfDetrModelInfo"
+			},
+			"RfDetrUploadResponse": {
+				"properties": {
+					"name": {
+						"type": "string",
+						"title": "Name"
+					},
+					"classes": {
+						"items": {
+							"type": "string"
+						},
+						"type": "array",
+						"title": "Classes"
+					},
+					"variant": {
+						"type": "string",
+						"enum": ["nano", "small", "medium", "large"],
+						"title": "Variant"
+					},
+					"message": {
+						"type": "string",
+						"title": "Message"
+					}
+				},
+				"type": "object",
+				"required": ["name", "classes", "variant", "message"],
+				"title": "RfDetrUploadResponse"
 			},
 			"Sam2AnnotateRequest": {
 				"properties": {
@@ -2338,6 +2818,12 @@
 						"type": "string",
 						"title": "Base Model"
 					},
+					"architecture": {
+						"type": "string",
+						"enum": ["yolo", "rfdetr"],
+						"title": "Architecture",
+						"default": "yolo"
+					},
 					"status": {
 						"type": "string",
 						"enum": ["queued", "running", "cancelling", "cancelled", "completed", "failed", "interrupted"],
@@ -2588,6 +3074,12 @@
 					"base_model": {
 						"type": "string",
 						"title": "Base Model"
+					},
+					"architecture": {
+						"type": "string",
+						"enum": ["yolo", "rfdetr"],
+						"title": "Architecture",
+						"default": "yolo"
 					},
 					"status": {
 						"type": "string",

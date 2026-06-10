@@ -4,7 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from pathlib import Path
 
-from app.routers import health_router, yolo_router, sam3_router, sam2_router, training_router
+from app.routers import health_router, yolo_router, rfdetr_router, sam3_router, sam2_router, training_router
 from app.services.training_service import TrainingService
 from app.services.worker_poller import start_worker_poller_if_configured
 
@@ -36,6 +36,7 @@ app.add_middleware(PrivateNetworkMiddleware)
 
 app.include_router(health_router)
 app.include_router(yolo_router)
+app.include_router(rfdetr_router)
 app.include_router(sam3_router)
 app.include_router(sam2_router)
 app.include_router(training_router)

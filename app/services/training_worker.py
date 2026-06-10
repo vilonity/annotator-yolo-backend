@@ -72,23 +72,10 @@ def main() -> int:
     resource_sampler = ResourceSampler(_on_resource_sample, interval=5.0)
     resource_sampler.start()
 
-    dataset_dir = job_dir / "dataset"
-    data_yaml_path = dataset_dir / "data.yaml"
-    runs_dir = job_dir / "runs"
-    runs_dir.mkdir(parents=True, exist_ok=True)
-
     try:
-        base_model = resolve_base_model(config["base_model"])
-        print(f"[training] loading model: {base_model}", flush=True)
-        model = YOLO(base_model)
-
         total_epochs = int(config["epochs"])
 
-        def _on_train_epoch_end(trainer) -> None:  # type: ignore[no-untyped-def]
-            try:
-                epoch = int(getattr(trainer, "epoch", 0)) + 1
-            except Exception:  # noqa: BLE001
-                return
+        def _on_epoch_end(epoch: int) -> None:
             update_metadata_progress(job_dir, current_epoch=epoch, total_epochs=total_epochs)
             training_callback.post_progress(
                 callback_url,
@@ -96,83 +83,22 @@ def main() -> int:
                 {"status": "running", "current_epoch": epoch, "total_epochs": total_epochs},
             )
 
-        model.add_callback("on_train_epoch_end", _on_train_epoch_end)
+        architecture = str(config.get("architecture") or "yolo").strip().lower()
+        if architecture == "rfdetr":
+            from app.services import rfdetr_training
 
-        train_args: dict[str, object] = {
-            "data": str(data_yaml_path),
-            "project": str(runs_dir),
-            "name": "train",
-            "exist_ok": True,
-            "epochs": total_epochs,
-            "imgsz": int(config.get("imgsz") or 640),
-            "batch": int(config.get("batch") or 16),
-            "workers": int(config["workers"]) if config.get("workers") is not None else 8,
-            "verbose": True,
-        }
+            outcome = rfdetr_training.run(config, job_dir, on_epoch_end=_on_epoch_end)
+        else:
+            outcome = _run_yolo_training(config, job_dir, on_epoch_end=_on_epoch_end)
 
-        if config.get("device") and config["device"] != "auto":
-            train_args["device"] = config["device"]
-
-        hyperparams = config.get("hyperparams") or {}
-        if isinstance(hyperparams, dict) and hyperparams:
-            for key, value in hyperparams.items():
-                if key in _RESERVED_TRAIN_ARGS:
-                    continue
-                if value is None:
-                    continue
-                train_args[key] = value
-
-        print(f"[training] args: {json.dumps(train_args, default=str)}", flush=True)
-        results = model.train(**train_args)
-
-        best_weights = resolve_best_weights_path(results)
-        if best_weights is None or not best_weights.exists():
-            raise RuntimeError("Unable to locate best.pt after training")
-
-        model_dir = YOLO_MODELS_DIR / config["output_model_name"]
-        model_dir.mkdir(parents=True, exist_ok=True)
-        registered_weights = model_dir / "weights.pt"
-        shutil.copy2(best_weights, registered_weights)
-
-        with (model_dir / "classes.json").open("w", encoding="utf-8") as classes_file:
-            json.dump(config["classes"], classes_file, ensure_ascii=True, indent=2)
-
-        with (model_dir / "training-metadata.json").open("w", encoding="utf-8") as metadata_file:
-            json.dump(
-                {
-                    "job_id": config["job_id"],
-                    "project_name": config["project_name"],
-                    "user_id": config["user_id"],
-                    "base_model": config["base_model"],
-                    "output_model_name": config["output_model_name"],
-                    "epochs": config["epochs"],
-                    "imgsz": config.get("imgsz"),
-                    "batch": config.get("batch"),
-                    "device": config.get("device"),
-                    "split": config["split"],
-                    "classes": config["classes"],
-                },
-                metadata_file,
-                ensure_ascii=True,
-                indent=2,
-            )
-
-        metrics = normalize_metrics(results)
+        metrics = outcome["metrics"]
         with metrics_path.open("w", encoding="utf-8") as metrics_file:
             json.dump(metrics, metrics_file, ensure_ascii=True, indent=2)
         if any(value is None for value in metrics.values()):
             print(f"[training] WARNING: some metrics are null after normalization: {metrics}", flush=True)
 
-        results_save_dir = Path(getattr(results, "save_dir", "") or runs_dir / "train")
-        results_csv_path = results_save_dir / "results.csv"
-        artifacts = {
-            "best_weights_path": str(registered_weights),
-            "results_csv_path": str(results_csv_path),
-        }
         with artifacts_path.open("w", encoding="utf-8") as artifacts_file:
-            json.dump(artifacts, artifacts_file, ensure_ascii=True, indent=2)
-
-        print(f"[training] registered model at {registered_weights}", flush=True)
+            json.dump(outcome["artifacts"], artifacts_file, ensure_ascii=True, indent=2)
 
         resource_sampler.stop()
 
@@ -194,12 +120,7 @@ def main() -> int:
             },
         )
 
-        artifacts_ok = _upload_artifacts(
-            callback_url,
-            callback_secret,
-            registered_weights=registered_weights,
-            results_save_dir=results_save_dir,
-        )
+        artifacts_ok = _upload_artifacts(callback_url, callback_secret, outcome["uploads"])
 
         if progress_ok and artifacts_ok:
             shutil.rmtree(job_dir, ignore_errors=True)
@@ -275,18 +196,92 @@ def _flush_remaining_logs(logs_path: Path, callback_url, callback_secret) -> Non
         print(f"[training-logs] flush error: {exc}", flush=True)
 
 
-def _upload_artifacts(
-    callback_url,
-    callback_secret,
-    *,
-    registered_weights: Path,
-    results_save_dir: Path,
-) -> bool:
-    if not callback_url or not callback_secret:
-        return True
+def _run_yolo_training(config: dict, job_dir: Path, *, on_epoch_end) -> dict:
+    dataset_dir = job_dir / "dataset"
+    data_yaml_path = dataset_dir / "data.yaml"
+    runs_dir = job_dir / "runs"
+    runs_dir.mkdir(parents=True, exist_ok=True)
+
+    base_model = resolve_base_model(config["base_model"])
+    print(f"[training] loading model: {base_model}", flush=True)
+    model = YOLO(base_model)
+
+    total_epochs = int(config["epochs"])
+
+    def _on_train_epoch_end(trainer) -> None:  # type: ignore[no-untyped-def]
+        try:
+            epoch = int(getattr(trainer, "epoch", 0)) + 1
+        except Exception:  # noqa: BLE001
+            return
+        on_epoch_end(epoch)
+
+    model.add_callback("on_train_epoch_end", _on_train_epoch_end)
+
+    train_args: dict[str, object] = {
+        "data": str(data_yaml_path),
+        "project": str(runs_dir),
+        "name": "train",
+        "exist_ok": True,
+        "epochs": total_epochs,
+        "imgsz": int(config.get("imgsz") or 640),
+        "batch": int(config.get("batch") or 16),
+        "workers": int(config["workers"]) if config.get("workers") is not None else 8,
+        "verbose": True,
+    }
+
+    if config.get("device") and config["device"] != "auto":
+        train_args["device"] = config["device"]
+
+    hyperparams = config.get("hyperparams") or {}
+    if isinstance(hyperparams, dict) and hyperparams:
+        for key, value in hyperparams.items():
+            if key in _RESERVED_TRAIN_ARGS:
+                continue
+            if value is None:
+                continue
+            train_args[key] = value
+
+    print(f"[training] args: {json.dumps(train_args, default=str)}", flush=True)
+    results = model.train(**train_args)
+
+    best_weights = resolve_best_weights_path(results)
+    if best_weights is None or not best_weights.exists():
+        raise RuntimeError("Unable to locate best.pt after training")
+
+    model_dir = YOLO_MODELS_DIR / config["output_model_name"]
+    model_dir.mkdir(parents=True, exist_ok=True)
+    registered_weights = model_dir / "weights.pt"
+    shutil.copy2(best_weights, registered_weights)
+
+    with (model_dir / "classes.json").open("w", encoding="utf-8") as classes_file:
+        json.dump(config["classes"], classes_file, ensure_ascii=True, indent=2)
+
+    with (model_dir / "training-metadata.json").open("w", encoding="utf-8") as metadata_file:
+        json.dump(
+            {
+                "job_id": config["job_id"],
+                "project_name": config["project_name"],
+                "user_id": config["user_id"],
+                "base_model": config["base_model"],
+                "output_model_name": config["output_model_name"],
+                "epochs": config["epochs"],
+                "imgsz": config.get("imgsz"),
+                "batch": config.get("batch"),
+                "device": config.get("device"),
+                "split": config["split"],
+                "classes": config["classes"],
+            },
+            metadata_file,
+            ensure_ascii=True,
+            indent=2,
+        )
+
+    metrics = normalize_metrics(results)
+
+    results_save_dir = Path(getattr(results, "save_dir", "") or runs_dir / "train")
+    results_csv_path = results_save_dir / "results.csv"
 
     uploads: list[tuple[str, Path]] = [("weights.pt", registered_weights)]
-
     plot_filenames = [
         "results.png",
         "confusion_matrix.png",
@@ -301,6 +296,22 @@ def _upload_artifacts(
         candidate = results_save_dir / filename
         if candidate.exists():
             uploads.append((filename, candidate))
+
+    print(f"[training] registered model at {registered_weights}", flush=True)
+
+    return {
+        "metrics": metrics,
+        "artifacts": {
+            "best_weights_path": str(registered_weights),
+            "results_csv_path": str(results_csv_path),
+        },
+        "uploads": uploads,
+    }
+
+
+def _upload_artifacts(callback_url, callback_secret, uploads: list[tuple[str, Path]]) -> bool:
+    if not callback_url or not callback_secret:
+        return True
 
     all_ok = True
     for filename, path in uploads:

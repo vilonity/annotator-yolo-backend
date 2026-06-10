@@ -16,7 +16,7 @@ LOG_STREAM_TRAILING_GRACE_SECONDS = 2.0
 import yaml
 from fastapi import HTTPException, UploadFile
 
-from app.config import BASE_DIR, TRAIN_JOBS_DIR, YOLO_MODELS_DIR
+from app.config import BASE_DIR, RFDETR_MODELS_DIR, TRAIN_JOBS_DIR, YOLO_MODELS_DIR
 from app.schemas.training import DeviceInfo, TrainingJobDetail, TrainingJobSummary
 from app.services import runpod_training
 from app.services import training_callback
@@ -169,6 +169,7 @@ class TrainingService:
         project_name: str,
         output_model_name: str,
         base_model: str,
+        architecture: str = "yolo",
         epochs: int,
         train_percent: int,
         val_percent: int,
@@ -189,13 +190,24 @@ class TrainingService:
         if provider not in {"local", "runpod"}:
             raise HTTPException(status_code=400, detail="Invalid training provider")
 
+        if architecture not in {"yolo", "rfdetr"}:
+            raise HTTPException(status_code=400, detail="Invalid training architecture")
+
+        # The RunPod flash worker only ships the ultralytics training path.
+        if architecture == "rfdetr" and provider == "runpod":
+            raise HTTPException(
+                status_code=400,
+                detail="RF-DETR training is only supported on the local provider",
+            )
+
         if provider == "runpod" and not runpod_training.is_runpod_available():
             raise HTTPException(
                 status_code=400,
                 detail="RunPod training is not configured on this server",
             )
 
-        if (YOLO_MODELS_DIR / output_model_name).exists():
+        target_models_dir = RFDETR_MODELS_DIR if architecture == "rfdetr" else YOLO_MODELS_DIR
+        if (target_models_dir / output_model_name).exists():
             raise HTTPException(status_code=400, detail="Model with this name already exists")
 
         try:
@@ -257,6 +269,7 @@ class TrainingService:
                 "project_name": project_name,
                 "output_model_name": output_model_name,
                 "base_model": base_model,
+                "architecture": architecture,
                 "epochs": epochs,
                 "imgsz": imgsz,
                 "batch": batch,
@@ -282,6 +295,7 @@ class TrainingService:
                 "output_model_name": output_model_name,
                 "produced_model_name": None,
                 "base_model": base_model,
+                "architecture": architecture,
                 "provider": provider,
                 "status": "queued",
                 "epochs": epochs,
