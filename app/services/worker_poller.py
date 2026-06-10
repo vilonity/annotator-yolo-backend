@@ -20,6 +20,7 @@ import threading
 import time
 from pathlib import Path
 from typing import Any, Optional
+from urllib.parse import urlsplit
 
 try:
     import requests
@@ -28,7 +29,7 @@ except ImportError:  # pragma: no cover - requests is in requirements but guard 
 
 from app.config import ANNOTATOR_API_URL, ANNOTATOR_API_VERIFY_TLS, ANNOTATOR_WORKER_TOKEN, TRAIN_JOBS_DIR
 from app.services import training_callback
-from app.services.training_service import TrainingService, now_iso
+from app.services.training_service import TERMINAL_STATUSES, TrainingService, now_iso
 
 # The server holds a poll open for up to ~20s; give it headroom.
 POLL_TIMEOUT_SECONDS = 40.0
@@ -68,6 +69,17 @@ class WorkerPoller:
 
     def _headers(self) -> dict[str, str]:
         return {"Authorization": f"Bearer {self._token}"}
+
+    def _rebase_callback_url(self, callback_url: Optional[str]) -> Optional[str]:
+        """Point the callback at the same server we poll.
+
+        The central API builds callback URLs from its BACKEND_HOST env, which
+        is easy to leave at the localhost default. The worker already knows
+        the right origin (ANNOTATOR_API_URL), so keep only the path.
+        """
+        if not callback_url:
+            return callback_url
+        return f"{self._api_url}{urlsplit(callback_url).path}"
 
     def _loop(self) -> None:
         backoff = ERROR_BACKOFF_MIN_SECONDS
@@ -110,22 +122,40 @@ class WorkerPoller:
         if bun_job_id is None:
             return
         local_id = remote_job_id(bun_job_id)
+        callback_url = self._rebase_callback_url(cancellation.get("callback_url"))
+        callback_secret = cancellation.get("callback_secret")
         try:
-            if TrainingService.has_job(local_id):
-                asyncio.run(TrainingService.cancel_job(local_id))
-                print(f"[worker-poller] cancellation forwarded to job {local_id}", flush=True)
-            else:
+            metadata = TrainingService._read_metadata(TRAIN_JOBS_DIR / local_id)  # noqa: SLF001 - internal reuse
+            if metadata is None:
                 # The job never reached this machine (or its dir is gone) —
                 # finalize it on the server so it stops being redelivered.
                 training_callback.post_progress(
-                    cancellation.get("callback_url"),
-                    cancellation.get("callback_secret"),
+                    callback_url,
+                    callback_secret,
                     {
                         "status": "cancelled",
                         "completed_at": now_iso(),
                         "error": "Training job was cancelled",
                     },
                 )
+            elif metadata.get("status") in TERMINAL_STATUSES:
+                # Already finished locally but the server still thinks it is
+                # cancelling (e.g. the original terminal callback was lost) —
+                # re-post the final state to sync up.
+                training_callback.post_progress(
+                    callback_url,
+                    callback_secret,
+                    {
+                        "status": metadata.get("status"),
+                        "completed_at": metadata.get("completed_at") or now_iso(),
+                        "produced_model_name": metadata.get("produced_model_name"),
+                        "metrics": metadata.get("metrics"),
+                        "error": metadata.get("error"),
+                    },
+                )
+            else:
+                asyncio.run(TrainingService.cancel_job(local_id))
+                print(f"[worker-poller] cancellation forwarded to job {local_id}", flush=True)
         except Exception as exc:  # noqa: BLE001
             print(f"[worker-poller] cancel of {local_id} failed: {exc}", flush=True)
 
@@ -147,7 +177,7 @@ class WorkerPoller:
 
     def _handle_job(self, job: dict[str, Any]) -> None:
         local_id = remote_job_id(job["id"])
-        callback_url = job.get("callback_url")
+        callback_url = self._rebase_callback_url(job.get("callback_url"))
         callback_secret = job.get("callback_secret")
 
         if TrainingService.has_job(local_id):
