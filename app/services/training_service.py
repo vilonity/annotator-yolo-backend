@@ -83,9 +83,8 @@ def _gpu_vram_gb(index: int) -> Optional[int]:
 
 def _list_local_devices() -> list[DeviceInfo]:
     host = _local_host_specs()
-    devices: list[DeviceInfo] = [
-        DeviceInfo(id="auto", name="auto", provider="local", ram_gb=host["ram_gb"], vcpus=host["vcpus"])
-    ]
+    auto = DeviceInfo(id="auto", name="auto", provider="local", ram_gb=host["ram_gb"], vcpus=host["vcpus"])
+    devices: list[DeviceInfo] = [auto]
 
     try:
         import torch
@@ -96,6 +95,8 @@ def _list_local_devices() -> list[DeviceInfo]:
         return devices
 
     if torch.cuda.is_available():
+        # "auto" resolves to the first GPU, so clients can size batch off its VRAM.
+        auto.vram_gb = _gpu_vram_gb(0)
         for index in range(torch.cuda.device_count()):
             devices.append(
                 DeviceInfo(
