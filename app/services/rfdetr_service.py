@@ -71,8 +71,14 @@ class RfDetrService:
 
         variant = cls._read_variant(model_dir)
         model_class = load_rfdetr_class(variant)
+        load_kwargs: dict[str, Any] = {"pretrain_weights": str(weights_files[0])}
+        resolution = cls._read_resolution(model_dir)
+        if resolution is not None:
+            # A checkpoint trained at a custom resolution stores positional
+            # embeddings for that grid — it must be loaded at the same resolution.
+            load_kwargs["resolution"] = resolution
         try:
-            model = model_class(pretrain_weights=str(weights_files[0]))
+            model = model_class(**load_kwargs)
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Failed to load RF-DETR model: {exc}") from exc
 
@@ -186,6 +192,19 @@ class RfDetrService:
         return DEFAULT_VARIANT
 
     @classmethod
+    def _read_resolution(cls, model_dir: Path) -> Optional[int]:
+        metadata_path = model_dir / "metadata.json"
+        if metadata_path.exists():
+            try:
+                with metadata_path.open() as f:
+                    resolution = json.load(f).get("resolution")
+                if isinstance(resolution, int) and resolution > 0:
+                    return resolution
+            except (OSError, json.JSONDecodeError):
+                pass
+        return None
+
+    @classmethod
     def _parse_classes_text(cls, raw_classes_text: str) -> List[str]:
         classes_list: Optional[List[str]] = None
 
@@ -253,6 +272,7 @@ class RfDetrService:
                         name=model_dir.name,
                         classes=classes,
                         variant=cls._read_variant(model_dir),
+                        resolution=cls._read_resolution(model_dir),
                         date_add=datetime.fromtimestamp(model_dir.stat().st_mtime).isoformat(),
                         size_bytes=size_bytes,
                     ))
@@ -289,6 +309,7 @@ class RfDetrService:
             name=new_name,
             classes=classes,
             variant=cls._read_variant(target_dir),
+            resolution=cls._read_resolution(target_dir),
             date_add=datetime.fromtimestamp(target_dir.stat().st_mtime).isoformat(),
             size_bytes=size_bytes,
         )
@@ -324,7 +345,7 @@ class RfDetrService:
                 x1, y1, x2, y2 = xyxy
                 class_index = int(class_id)
                 raw_name = class_names[class_index] if 0 <= class_index < len(class_names) else str(class_index)
-                mapped_name = payload.class_map.get(raw_name) if payload.class_map else raw_name
+                mapped_name = payload.class_map.get(raw_name, raw_name) if payload.class_map else raw_name
                 annotations_list.append(
                     {
                         "bbox": [x1, y1, x2, y2],

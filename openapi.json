@@ -1240,6 +1240,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
+									"additionalProperties": true,
 									"type": "object",
 									"title": "Response Runpod Diagnostics Training Runpod Diagnostics Get"
 								}
@@ -1617,6 +1618,7 @@
 					"annotations": {
 						"items": {
 							"items": {
+								"additionalProperties": true,
 								"type": "object"
 							},
 							"type": "array"
@@ -2131,6 +2133,7 @@
 					"annotations": {
 						"items": {
 							"items": {
+								"additionalProperties": true,
 								"type": "object"
 							},
 							"type": "array"
@@ -2160,6 +2163,17 @@
 						"type": "string",
 						"enum": ["nano", "small", "medium", "large"],
 						"title": "Variant"
+					},
+					"resolution": {
+						"anyOf": [
+							{
+								"type": "integer"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Resolution"
 					},
 					"date_add": {
 						"type": "string",

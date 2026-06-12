@@ -13,7 +13,9 @@ same convention as the YOLO models.
 
 from __future__ import annotations
 
+import csv
 import json
+import math
 import shutil
 from pathlib import Path
 from typing import Any, Callable, Optional
@@ -37,6 +39,18 @@ _VARIANT_CLASS_NAMES = {
     "medium": "RFDETRMedium",
     "large": "RFDETRLarge",
 }
+
+# Default square input resolution per variant (rfdetr package defaults).
+VARIANT_DEFAULT_RESOLUTION = {
+    "nano": 384,
+    "small": 512,
+    "medium": 576,
+    "large": 704,
+}
+
+# resolution must be divisible by patch_size * num_windows; all current
+# detection variants use patch 16 x 2 windows.
+RESOLUTION_DIVISOR = 32
 
 # rfdetr Model.train() kwargs that job hyperparams may override.
 ALLOWED_HYPERPARAMS = frozenset(
@@ -85,7 +99,7 @@ def run(
     classes = [str(name) for name in config.get("classes") or []]
     convert_yolo_dataset_to_coco(dataset_dir, coco_dir, classes)
 
-    variant, pretrain_weights = resolve_base_model(str(config["base_model"]))
+    variant, pretrain_weights, base_resolution = resolve_base_model(str(config["base_model"]))
     class_name = _VARIANT_CLASS_NAMES[variant]
     model_class = getattr(rfdetr, class_name, None)
     if model_class is None:
@@ -94,6 +108,11 @@ def run(
     init_kwargs: dict[str, Any] = {}
     if pretrain_weights is not None:
         init_kwargs["pretrain_weights"] = str(pretrain_weights)
+        if base_resolution is not None:
+            # A fine-tuned checkpoint stores positional embeddings for the grid it
+            # was trained at — the model must be constructed at that resolution for
+            # the weights to load; the requested resolution is applied via train().
+            init_kwargs["resolution"] = base_resolution
     device = str(config.get("device") or "auto").strip()
     if device and device != "auto":
         init_kwargs["device"] = device
@@ -101,7 +120,7 @@ def run(
     print(f"[training] loading RF-DETR {variant} (pretrain={pretrain_weights or 'COCO default'})", flush=True)
     model = model_class(**init_kwargs)
 
-    _attach_epoch_callback(model, on_epoch_end)
+    detach_epoch_callback = _attach_epoch_callback(model, on_epoch_end)
 
     train_args: dict[str, Any] = {
         "dataset_dir": str(coco_dir),
@@ -110,6 +129,11 @@ def run(
     }
     if config.get("batch"):
         train_args["batch_size"] = int(config["batch"])
+
+    # The job's imgsz selects the RF-DETR input resolution; an explicit
+    # "resolution" hyperparam (applied in the loop below) still wins.
+    if config.get("imgsz"):
+        train_args["resolution"] = int(config["imgsz"])
 
     hyperparams = config.get("hyperparams") or {}
     if isinstance(hyperparams, dict):
@@ -120,8 +144,18 @@ def run(
             if key in ALLOWED_HYPERPARAMS and value is not None:
                 train_args[key] = value
 
+    resolution = int(train_args.get("resolution") or base_resolution or VARIANT_DEFAULT_RESOLUTION[variant])
+    if resolution % RESOLUTION_DIVISOR != 0:
+        raise RuntimeError(
+            f"RF-DETR resolution {resolution} is invalid — it must be a multiple of {RESOLUTION_DIVISOR}"
+        )
+    train_args["resolution"] = resolution
+
     print(f"[training] rfdetr args: {json.dumps(train_args, default=str)}", flush=True)
-    model.train(**train_args)
+    try:
+        model.train(**train_args)
+    finally:
+        detach_epoch_callback()
 
     best_weights = resolve_best_checkpoint(output_dir)
     if best_weights is None:
@@ -136,7 +170,7 @@ def run(
         json.dump(classes, classes_file, ensure_ascii=True, indent=2)
 
     with (model_dir / "metadata.json").open("w", encoding="utf-8") as metadata_file:
-        json.dump({"variant": variant}, metadata_file, ensure_ascii=True)
+        json.dump({"variant": variant, "resolution": resolution}, metadata_file, ensure_ascii=True)
 
     with (model_dir / "training-metadata.json").open("w", encoding="utf-8") as training_metadata_file:
         json.dump(
@@ -146,6 +180,7 @@ def run(
                 "user_id": config["user_id"],
                 "architecture": "rfdetr",
                 "variant": variant,
+                "resolution": resolution,
                 "base_model": config["base_model"],
                 "output_model_name": config["output_model_name"],
                 "epochs": config["epochs"],
@@ -159,7 +194,7 @@ def run(
             indent=2,
         )
 
-    metrics = read_metrics_from_log(output_dir / "log.txt")
+    metrics = read_training_metrics(output_dir)
     print(f"[training] registered RF-DETR model at {registered_weights}", flush=True)
 
     return {
@@ -169,32 +204,38 @@ def run(
     }
 
 
-def resolve_base_model(base_model: str) -> tuple[str, Optional[Path]]:
-    """Map a job base_model onto (variant, pretrain weights path).
+def resolve_base_model(base_model: str) -> tuple[str, Optional[Path], Optional[int]]:
+    """Map a job base_model onto (variant, pretrain weights path, trained resolution).
 
     Either a built-in alias ("rfdetr-medium" → COCO checkpoint downloaded by
     the package) or the name of a locally registered RF-DETR model to
-    fine-tune from.
+    fine-tune from. The trained resolution is only known for local models that
+    persisted it in metadata.json.
     """
     normalized = base_model.strip().lower()
     if normalized in BASE_MODEL_VARIANTS:
-        return BASE_MODEL_VARIANTS[normalized], None
+        return BASE_MODEL_VARIANTS[normalized], None, None
 
     local_model_dir = RFDETR_MODELS_DIR / base_model
     if local_model_dir.exists():
         weights_candidates = sorted(local_model_dir.glob("weights.*"))
         if weights_candidates:
             variant = "medium"
+            resolution: Optional[int] = None
             metadata_path = local_model_dir / "metadata.json"
             if metadata_path.exists():
                 try:
                     with metadata_path.open() as metadata_file:
-                        stored = json.load(metadata_file).get("variant")
+                        metadata = json.load(metadata_file)
+                    stored = metadata.get("variant")
                     if stored in _VARIANT_CLASS_NAMES:
                         variant = stored
+                    stored_resolution = metadata.get("resolution")
+                    if isinstance(stored_resolution, int) and stored_resolution > 0:
+                        resolution = stored_resolution
                 except (OSError, json.JSONDecodeError):
                     pass
-            return variant, weights_candidates[0]
+            return variant, weights_candidates[0], resolution
 
     raise RuntimeError(
         f"Unknown RF-DETR base model '{base_model}' "
@@ -202,11 +243,49 @@ def resolve_base_model(base_model: str) -> tuple[str, Optional[Path]]:
     )
 
 
-def _attach_epoch_callback(model: Any, on_epoch_end: Callable[[int], None]) -> None:
+def _attach_epoch_callback(model: Any, on_epoch_end: Callable[[int], None]) -> Callable[[], None]:
+    """Hook per-epoch progress reporting into rfdetr.
+
+    rfdetr >= 1.7 trains through PyTorch Lightning and discards the legacy
+    ``model.callbacks`` dict, so the trainer factory is wrapped to append a
+    PTL callback to the built trainer (``build_trainer`` is resolved from
+    ``rfdetr.training`` at ``train()`` call time, so patching the module
+    attribute is enough; passing ``callbacks`` through trainer kwargs would
+    replace the built-in EMA/checkpoint callbacks). Older versions still
+    consume the dict. Returns a detach function that undoes the patch.
+    """
+    try:
+        import pytorch_lightning as pl
+        import rfdetr.training as rfdetr_training
+
+        original_build_trainer = rfdetr_training.build_trainer
+    except (ImportError, AttributeError):
+        pass
+    else:
+
+        class _EpochProgressCallback(pl.Callback):
+            def on_train_epoch_end(self, trainer: Any, pl_module: Any) -> None:
+                try:
+                    on_epoch_end(int(trainer.current_epoch) + 1)
+                except (TypeError, ValueError):
+                    pass
+
+        def build_trainer_with_progress(*args: Any, **kwargs: Any) -> Any:
+            trainer = original_build_trainer(*args, **kwargs)
+            trainer.callbacks.append(_EpochProgressCallback())
+            return trainer
+
+        rfdetr_training.build_trainer = build_trainer_with_progress
+
+        def detach() -> None:
+            rfdetr_training.build_trainer = original_build_trainer
+
+        return detach
+
     callbacks = getattr(model, "callbacks", None)
     if not isinstance(callbacks, dict):
         print("[training] rfdetr model exposes no callbacks — epoch progress disabled", flush=True)
-        return
+        return lambda: None
 
     def _on_fit_epoch_end(log: Any) -> None:
         epoch = log.get("epoch") if isinstance(log, dict) else None
@@ -219,6 +298,7 @@ def _attach_epoch_callback(model: Any, on_epoch_end: Callable[[int], None]) -> N
         callbacks["on_fit_epoch_end"].append(_on_fit_epoch_end)
     except Exception as exc:  # noqa: BLE001
         print(f"[training] failed to attach rfdetr epoch callback: {exc}", flush=True)
+    return lambda: None
 
 
 def resolve_best_checkpoint(output_dir: Path) -> Optional[Path]:
@@ -228,6 +308,63 @@ def resolve_best_checkpoint(output_dir: Path) -> Optional[Path]:
             return candidate
     remaining = sorted(output_dir.glob("checkpoint*.pth"))
     return remaining[-1] if remaining else None
+
+
+def read_training_metrics(output_dir: Path) -> dict[str, float | None]:
+    """Best-epoch validation metrics from whichever log format this rfdetr wrote.
+
+    rfdetr < 1.7 appends DETR-style JSON lines to log.txt; >= 1.7 always logs
+    through PTL's CSVLogger into metrics.csv.
+    """
+    metrics = read_metrics_from_log(output_dir / "log.txt")
+    if metrics["map"] is not None:
+        return metrics
+    return read_metrics_from_csv(output_dir / "metrics.csv")
+
+
+def _parse_metric(value: str | None) -> float | None:
+    if not value:
+        return None
+    try:
+        parsed = float(value)
+    except ValueError:
+        return None
+    return parsed if math.isfinite(parsed) else None
+
+
+def read_metrics_from_csv(csv_path: Path) -> dict[str, float | None]:
+    """Extract best-epoch metrics from PTL CSVLogger output (rfdetr >= 1.7).
+
+    Rows are sparse. COCOEvalCallback logs ``val/mAP_50_95``/``val/mAP_50``
+    plus ``val/precision``/``val/recall`` for the regular weights and an
+    ``val/ema_``-prefixed mAP-only flavor for the EMA weights. The best row by
+    mAP@0.50:0.95 across both flavors is reported — same criterion the
+    best-checkpoint selection uses.
+    """
+    metrics: dict[str, float | None] = {"precision": None, "recall": None, "map50": None, "map": None}
+    if not csv_path.exists():
+        return metrics
+
+    best: dict[str, float | None] | None = None
+    try:
+        with csv_path.open("r", encoding="utf-8", errors="replace", newline="") as csv_file:
+            for row in csv.DictReader(csv_file):
+                for prefix in ("val/", "val/ema_"):
+                    current_map = _parse_metric(row.get(f"{prefix}mAP_50_95"))
+                    if current_map is None:
+                        continue
+                    best_map = best["map"] if best is not None else None
+                    if best_map is not None and current_map <= best_map:
+                        continue
+                    best = {
+                        "map": current_map,
+                        "map50": _parse_metric(row.get(f"{prefix}mAP_50")),
+                        "precision": _parse_metric(row.get("val/precision")),
+                        "recall": _parse_metric(row.get("val/recall")),
+                    }
+    except OSError:
+        return metrics
+    return best if best is not None else metrics
 
 
 def read_metrics_from_log(log_path: Path) -> dict[str, float | None]:
@@ -284,8 +421,10 @@ def convert_yolo_dataset_to_coco(dataset_dir: Path, target_dir: Path, class_name
         images_dir = dataset_dir / "images" / source_split
         if not images_dir.is_dir():
             continue
+        # The staged zip mirrors the project's folder tree (images/train/<folder>/<name>),
+        # so the scan must be recursive — iterdir() would miss every foldered image.
         image_paths = sorted(
-            entry for entry in images_dir.iterdir() if entry.is_file() and entry.suffix.lower() in IMAGE_EXTS
+            entry for entry in images_dir.rglob("*") if entry.is_file() and entry.suffix.lower() in IMAGE_EXTS
         )
         if not image_paths:
             continue
@@ -305,14 +444,17 @@ def convert_yolo_dataset_to_coco(dataset_dir: Path, target_dir: Path, class_name
 
         annotation_id = 1
         for image_id, image_path in enumerate(image_paths):
+            relative = image_path.relative_to(images_dir)
             with Image.open(image_path) as image:
                 width, height = image.size
-            shutil.copy2(image_path, split_dir / image_path.name)
+            target_path = split_dir / relative
+            target_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(image_path, target_path)
             coco["images"].append(
-                {"id": image_id, "file_name": image_path.name, "width": width, "height": height}
+                {"id": image_id, "file_name": relative.as_posix(), "width": width, "height": height}
             )
 
-            label_path = dataset_dir / "labels" / source_split / f"{image_path.stem}.txt"
+            label_path = dataset_dir / "labels" / source_split / relative.with_suffix(".txt")
             if not label_path.exists():
                 continue
             with label_path.open("r", encoding="utf-8") as label_file:

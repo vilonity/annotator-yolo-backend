@@ -9,6 +9,9 @@ class RfDetrModelInfo(BaseModel):
     name: str
     classes: list[str]
     variant: RfDetrVariant
+    # Square input resolution the model was trained at; None for models
+    # uploaded without metadata (the variant default applies).
+    resolution: Optional[int] = None
     date_add: str
     size_bytes: int
 
