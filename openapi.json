@@ -159,6 +159,44 @@
 				}
 			}
 		},
+		"/yolo-models/{model_name}/onnx": {
+			"get": {
+				"tags": ["yolo"],
+				"summary": "Export Yolo Model Onnx",
+				"operationId": "export_yolo_model_onnx_yolo_models__model_name__onnx_get",
+				"parameters": [
+					{
+						"name": "model_name",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"title": "Model Name"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Successful Response",
+						"content": {
+							"application/json": {
+								"schema": {}
+							}
+						}
+					},
+					"422": {
+						"description": "Validation Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
 		"/yolo-models/{model_name}/classes": {
 			"get": {
 				"tags": ["yolo"],
@@ -434,6 +472,44 @@
 				"tags": ["rfdetr"],
 				"summary": "Download Rfdetr Model Weights",
 				"operationId": "download_rfdetr_model_weights_rfdetr_models__model_name__weights_get",
+				"parameters": [
+					{
+						"name": "model_name",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string",
+							"title": "Model Name"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Successful Response",
+						"content": {
+							"application/json": {
+								"schema": {}
+							}
+						}
+					},
+					"422": {
+						"description": "Validation Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						}
+					}
+				}
+			}
+		},
+		"/rfdetr-models/{model_name}/onnx": {
+			"get": {
+				"tags": ["rfdetr"],
+				"summary": "Export Rfdetr Model Onnx",
+				"operationId": "export_rfdetr_model_onnx_rfdetr_models__model_name__onnx_get",
 				"parameters": [
 					{
 						"name": "model_name",
@@ -3457,6 +3533,17 @@
 					"size_bytes": {
 						"type": "integer",
 						"title": "Size Bytes"
+					},
+					"imgsz": {
+						"anyOf": [
+							{
+								"type": "integer"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Imgsz"
 					}
 				},
 				"type": "object",

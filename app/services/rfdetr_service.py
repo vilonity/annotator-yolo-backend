@@ -1,6 +1,9 @@
 import io
 import json
+import logging
 import shutil
+import tempfile
+import threading
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -24,6 +27,25 @@ _VARIANT_CLASS_NAMES = {
     "medium": "RFDETRMedium",
     "large": "RFDETRLarge",
 }
+
+logger = logging.getLogger(__name__)
+
+# Loading a fine-tuned checkpoint at its trained resolution always makes the
+# rfdetr package warn that DINOv2 backbone weights are skipped — expected for
+# every checkpoint we serve, so these messages are pure noise here.
+_BENIGN_LOAD_WARNINGS = (
+    "not loading DINOv2 backbone weights",
+    "args.num_queries absent",
+)
+
+
+class _BenignLoadWarningFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+        return not any(marker in message for marker in _BENIGN_LOAD_WARNINGS)
+
+
+logging.getLogger("rf-detr").addFilter(_BenignLoadWarningFilter())
 
 
 def load_rfdetr_class(variant: str):
@@ -50,6 +72,8 @@ def load_rfdetr_class(variant: str):
 
 class RfDetrService:
     _cache: dict[str, Any] = {}
+    _export_locks: dict[str, threading.Lock] = {}
+    _export_locks_guard = threading.Lock()
 
     @classmethod
     def get_model(cls, name: str) -> tuple[Any, list[str]]:
@@ -71,7 +95,10 @@ class RfDetrService:
 
         variant = cls._read_variant(model_dir)
         model_class = load_rfdetr_class(variant)
-        load_kwargs: dict[str, Any] = {"pretrain_weights": str(weights_files[0])}
+        load_kwargs: dict[str, Any] = {
+            "pretrain_weights": str(weights_files[0]),
+            "num_classes": len(classes_list),
+        }
         resolution = cls._read_resolution(model_dir)
         if resolution is not None:
             # A checkpoint trained at a custom resolution stores positional
@@ -81,6 +108,13 @@ class RfDetrService:
             model = model_class(**load_kwargs)
         except Exception as exc:
             raise HTTPException(status_code=500, detail=f"Failed to load RF-DETR model: {exc}") from exc
+
+        try:
+            model.optimize_for_inference()
+        except Exception as exc:
+            # Best-effort: tracing/half-precision can fail on some torch builds
+            # (e.g. CPU-only); the un-optimized model still predicts correctly.
+            logger.warning("optimize_for_inference failed for %s, serving un-optimized model: %s", name, exc)
 
         cls._cache[name] = model
         return model, classes_list
@@ -156,6 +190,40 @@ class RfDetrService:
             raise HTTPException(status_code=404, detail="Model classes file not found")
 
         return weights_candidates[0], classes_path
+
+    @classmethod
+    def export_onnx(cls, name: str) -> Path:
+        weights_path, _ = cls.get_model_files(name)
+        model_dir = weights_path.parent
+        # Not weights.* — get_model and friends resolve weights via
+        # glob("weights.*"), so an export named weights.onnx would shadow them.
+        onnx_path = model_dir / "export.onnx"
+        if onnx_path.exists() and onnx_path.stat().st_mtime >= weights_path.stat().st_mtime:
+            return onnx_path
+
+        with cls._export_locks_guard:
+            lock = cls._export_locks.setdefault(name, threading.Lock())
+
+        with lock:
+            if onnx_path.exists() and onnx_path.stat().st_mtime >= weights_path.stat().st_mtime:
+                return onnx_path
+
+            # rfdetr's export() deepcopies the live model and restores its
+            # device on exit, so the cached inference model is safe to reuse.
+            model, _ = cls.get_model(name)
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                try:
+                    exported = model.export(output_dir=tmp_dir, format="onnx", verbose=False)
+                except ImportError as exc:
+                    raise HTTPException(
+                        status_code=503,
+                        detail="ONNX export dependencies missing on this server (pip install rfdetr[onnx])",
+                    ) from exc
+                except Exception as exc:
+                    raise HTTPException(status_code=500, detail=f"ONNX export failed: {exc}") from exc
+                shutil.move(str(exported), str(onnx_path))
+
+        return onnx_path
 
     @classmethod
     def _ensure_new_model(cls, name: str) -> None:

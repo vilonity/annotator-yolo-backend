@@ -47,6 +47,16 @@ def download_yolo_model_weights(model_name: str):
     )
 
 
+@router.get("/{model_name}/onnx")
+def export_yolo_model_onnx(model_name: str):
+    onnx_path = YoloService.export_onnx(model_name)
+    return FileResponse(
+        path=str(onnx_path),
+        media_type="application/octet-stream",
+        filename=f"{model_name}.onnx",
+    )
+
+
 @router.get("/{model_name}/classes")
 def download_yolo_model_classes(model_name: str):
     _, classes_path = YoloService.get_model_files(model_name)

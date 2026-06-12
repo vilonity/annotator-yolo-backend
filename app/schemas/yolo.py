@@ -7,6 +7,9 @@ class YoloModelInfo(BaseModel):
     classes: list[str]
     date_add: str
     size_bytes: int
+    # Square training resolution from training-metadata.json; None for uploaded
+    # models or jobs that trained with auto imgsz.
+    imgsz: Optional[int] = None
 
 
 class AutoAnnotateRequest(BaseModel):

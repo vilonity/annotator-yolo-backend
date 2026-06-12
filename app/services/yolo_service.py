@@ -1,6 +1,8 @@
 import io
 import json
 import shutil
+import tempfile
+import threading
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +22,8 @@ SUPPORTED_CLASSES_NAMES = {"classes.json", "classes.txt", "classes.yaml", "class
 
 class YoloService:
     _cache: dict[str, YOLO] = {}
+    _export_locks: dict[str, threading.Lock] = {}
+    _export_locks_guard = threading.Lock()
 
     @classmethod
     def get_model(cls, name: str) -> tuple[YOLO, list[str]]:
@@ -132,6 +136,58 @@ class YoloService:
         return weights_candidates[0], classes_path
 
     @classmethod
+    def _read_imgsz(cls, model_dir: Path) -> Optional[int]:
+        metadata_path = model_dir / "training-metadata.json"
+        if metadata_path.exists():
+            try:
+                with metadata_path.open() as f:
+                    imgsz = json.load(f).get("imgsz")
+                if isinstance(imgsz, int) and imgsz > 0:
+                    return imgsz
+            except (OSError, json.JSONDecodeError):
+                pass
+        return None
+
+    @classmethod
+    def export_onnx(cls, name: str) -> Path:
+        weights_path, _ = cls.get_model_files(name)
+        if weights_path.suffix == ".onnx":
+            return weights_path
+
+        model_dir = weights_path.parent
+        # The export must not be named weights.* — get_model and friends resolve
+        # weights via glob("weights.*") and weights.onnx would shadow weights.pt.
+        onnx_path = model_dir / "export.onnx"
+        if onnx_path.exists() and onnx_path.stat().st_mtime >= weights_path.stat().st_mtime:
+            return onnx_path
+
+        with cls._export_locks_guard:
+            lock = cls._export_locks.setdefault(name, threading.Lock())
+
+        with lock:
+            if onnx_path.exists() and onnx_path.stat().st_mtime >= weights_path.stat().st_mtime:
+                return onnx_path
+
+            export_kwargs: dict = {"format": "onnx", "simplify": False, "device": "cpu"}
+            imgsz = cls._read_imgsz(model_dir)
+            if imgsz is not None:
+                export_kwargs["imgsz"] = imgsz
+
+            # Export in a temp dir on a fresh YOLO instance: export() fuses layers
+            # in-place (the inference cache must stay pristine) and writes its
+            # output next to the weights file.
+            with tempfile.TemporaryDirectory() as tmp_dir:
+                tmp_weights = Path(tmp_dir) / weights_path.name
+                shutil.copy2(weights_path, tmp_weights)
+                try:
+                    exported = YOLO(str(tmp_weights)).export(**export_kwargs)
+                except Exception as exc:
+                    raise HTTPException(status_code=500, detail=f"ONNX export failed: {exc}") from exc
+                shutil.move(str(exported), str(onnx_path))
+
+        return onnx_path
+
+    @classmethod
     def _ensure_new_model(cls, name: str) -> None:
         cls._validate_model_name(name)
         model_dir = YOLO_MODELS_DIR / name
@@ -218,6 +274,7 @@ class YoloService:
                         classes=classes,
                         date_add=datetime.fromtimestamp(model_dir.stat().st_mtime).isoformat(),
                         size_bytes=size_bytes,
+                        imgsz=cls._read_imgsz(model_dir),
                     ))
         return models
 
@@ -253,6 +310,7 @@ class YoloService:
             classes=classes,
             date_add=datetime.fromtimestamp(target_dir.stat().st_mtime).isoformat(),
             size_bytes=size_bytes,
+            imgsz=cls._read_imgsz(target_dir),
         )
 
     @classmethod
@@ -298,7 +356,7 @@ class YoloService:
             for xyxy, cls_idx, conf in zip(boxes.xyxy.tolist(), boxes.cls.tolist(), boxes.conf.tolist()):
                 x1, y1, x2, y2 = xyxy
                 raw_name = class_names[int(cls_idx)] if int(cls_idx) < len(class_names) else str(cls_idx)
-                mapped_name = payload.class_map.get(raw_name) if payload.class_map else raw_name
+                mapped_name = payload.class_map.get(raw_name, raw_name) if payload.class_map else raw_name
                 annotations_list.append(
                     {
                         "bbox": [x1, y1, x2, y2],

@@ -17,7 +17,8 @@ from main import app
 def main() -> None:
     output = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).parent / "openapi.json"
     output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text(json.dumps(app.openapi(), indent=2), encoding="utf-8")
+    # Tab indentation matches the monorepo's oxfmt style so regens stay diff-friendly.
+    output.write_text(json.dumps(app.openapi(), indent="\t"), encoding="utf-8")
     print(f"Wrote {output}")
 
 
