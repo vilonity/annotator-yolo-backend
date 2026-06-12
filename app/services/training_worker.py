@@ -9,9 +9,14 @@ import traceback
 from datetime import datetime, UTC
 from pathlib import Path
 
-from ultralytics import YOLO
+from ultralytics import YOLO, settings as ultralytics_settings
 
 from app.config import YOLO_MODELS_DIR
+
+# This project does not use MLflow, but ultralytics auto-registers its MLflow
+# callback whenever the package is installed, and mlflow>=3 raises on the
+# default file-store backend — which aborts training before the first epoch.
+ultralytics_settings.update({"mlflow": False})
 from app.services import training_callback
 from app.services.resource_sampler import ResourceSampler
 
