@@ -36,11 +36,25 @@ POLL_TIMEOUT_SECONDS = 40.0
 DOWNLOAD_TIMEOUT_SECONDS = 600.0
 ERROR_BACKOFF_MIN_SECONDS = 5.0
 ERROR_BACKOFF_MAX_SECONDS = 60.0
+# The server re-queues a claimed job after STALE_CLAIM_MS (3 min) without a
+# heartbeat, so refresh the claim well within that window while downloading.
+CLAIM_HEARTBEAT_INTERVAL_SECONDS = 60.0
+
+
+class JobCancelledDuringDownload(Exception):
+    """A claim heartbeat reported the job was cancelled server-side."""
 
 
 def remote_job_id(bun_job_id: int) -> str:
     """Deterministic local job id for a job dispatched by the central API."""
     return f"remote-{bun_job_id}"
+
+
+def _format_download_progress(downloaded: int, total: int) -> str:
+    downloaded_mb = downloaded / (1024 * 1024)
+    if total > 0:
+        return f"{downloaded_mb:.0f}/{total / (1024 * 1024):.0f} MB ({downloaded * 100 // total}%)"
+    return f"{downloaded_mb:.0f} MB"
 
 
 def _local_devices_payload() -> list[dict[str, Any]]:
@@ -161,7 +175,38 @@ class WorkerPoller:
 
     # ── job dispatch ─────────────────────────────────────────────────
 
-    def _download_dataset(self, dataset_path: str, target: Path) -> None:
+    def _post_claim_heartbeat(self, bun_job_id: int) -> Optional[str]:
+        """Refresh the server-side claim. Returns the job's current status, or
+        None when the heartbeat failed (best-effort: one miss only matters if
+        every retry within the stale-claim window misses too)."""
+        try:
+            response = requests.post(
+                f"{self._api_url}/api/worker/jobs/{bun_job_id}/heartbeat",
+                headers=self._headers(),
+                timeout=10.0,
+                verify=self._verify_tls,
+            )
+            response.raise_for_status()
+            status = response.json().get("status")
+            return status if isinstance(status, str) else None
+        except Exception as exc:  # noqa: BLE001
+            print(f"[worker-poller] claim heartbeat for job {bun_job_id} failed: {exc}", flush=True)
+            return None
+
+    def _download_dataset(
+        self,
+        bun_job_id: int,
+        dataset_path: str,
+        target: Path,
+        callback_url: Optional[str],
+        callback_secret: Optional[str],
+    ) -> None:
+        """Stream the dataset zip, heartbeating the claim and reporting progress.
+
+        Large datasets take longer than the server's stale-claim window, so
+        without the periodic heartbeat a second worker instance would re-claim
+        and double-start the job mid-download.
+        """
         with requests.get(
             f"{self._api_url}{dataset_path}",
             headers=self._headers(),
@@ -170,10 +215,25 @@ class WorkerPoller:
             stream=True,
         ) as response:
             response.raise_for_status()
+            total_bytes = int(response.headers.get("Content-Length") or 0)
+            downloaded = 0
+            last_report = time.monotonic()
             with target.open("wb") as fh:
                 for chunk in response.iter_content(chunk_size=1024 * 1024):
-                    if chunk:
-                        fh.write(chunk)
+                    if not chunk:
+                        continue
+                    fh.write(chunk)
+                    downloaded += len(chunk)
+                    if time.monotonic() - last_report < CLAIM_HEARTBEAT_INTERVAL_SECONDS:
+                        continue
+                    last_report = time.monotonic()
+                    if self._post_claim_heartbeat(bun_job_id) in ("cancelling", "cancelled"):
+                        raise JobCancelledDuringDownload()
+                    progress = _format_download_progress(downloaded, total_bytes)
+                    print(f"[worker-poller] job {bun_job_id} dataset download: {progress}", flush=True)
+                    training_callback.post_log_chunk(
+                        callback_url, callback_secret, f"[worker] downloading dataset: {progress}\n"
+                    )
 
     def _handle_job(self, job: dict[str, Any]) -> None:
         local_id = remote_job_id(job["id"])
@@ -197,7 +257,22 @@ class WorkerPoller:
         tmp_dir = tempfile.mkdtemp(prefix="annotator-worker-")
         tmp_zip = Path(tmp_dir) / "dataset.zip"
         try:
-            self._download_dataset(job["dataset_path"], tmp_zip)
+            # The job stays "queued" on the server until the spawned training
+            # process posts "running" — surface the download in the job logs so
+            # the UI is not silent for the whole transfer.
+            training_callback.post_log_chunk(callback_url, callback_secret, "[worker] downloading dataset...\n")
+            self._download_dataset(job["id"], job["dataset_path"], tmp_zip, callback_url, callback_secret)
+
+            size_mb = tmp_zip.stat().st_size / (1024 * 1024)
+            print(f"[worker-poller] job {local_id} dataset downloaded ({size_mb:.0f} MB)", flush=True)
+            training_callback.post_log_chunk(
+                callback_url,
+                callback_secret,
+                f"[worker] dataset downloaded ({size_mb:.0f} MB), starting training\n",
+            )
+            # Extraction + process spawn below can also take a while on big
+            # datasets — refresh the claim once more before committing to it.
+            self._post_claim_heartbeat(job["id"])
 
             hyperparams = job.get("hyperparams") or {}
             split = job.get("split") or {}
@@ -234,6 +309,13 @@ class WorkerPoller:
                 training_callback.post_progress_async(
                     callback_url, callback_secret, {"device_name": detail.device_name}
                 )
+        except JobCancelledDuringDownload:
+            print(f"[worker-poller] job {local_id} cancelled during dataset download", flush=True)
+            training_callback.post_progress(
+                callback_url,
+                callback_secret,
+                {"status": "cancelled", "completed_at": now_iso(), "error": "Training job was cancelled"},
+            )
         except Exception as exc:  # noqa: BLE001
             detail_text = getattr(exc, "detail", None) or str(exc) or "Failed to start training job"
             print(f"[worker-poller] failed to start job {local_id}: {detail_text}", flush=True)
