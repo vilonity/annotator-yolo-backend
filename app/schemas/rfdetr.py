@@ -14,6 +14,9 @@ class RfDetrModelInfo(BaseModel):
     resolution: Optional[int] = None
     date_add: str
     size_bytes: int
+    # True when the model was produced by a training job on this server
+    # (training-metadata.json exists); False for uploaded weights.
+    trained: bool = False
 
 
 class RfDetrAnnotateRequest(BaseModel):

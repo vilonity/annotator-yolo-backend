@@ -2258,6 +2258,11 @@
 					"size_bytes": {
 						"type": "integer",
 						"title": "Size Bytes"
+					},
+					"trained": {
+						"type": "boolean",
+						"title": "Trained",
+						"default": false
 					}
 				},
 				"type": "object",
@@ -3544,6 +3549,11 @@
 							}
 						],
 						"title": "Imgsz"
+					},
+					"trained": {
+						"type": "boolean",
+						"title": "Trained",
+						"default": false
 					}
 				},
 				"type": "object",

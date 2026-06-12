@@ -343,6 +343,7 @@ class RfDetrService:
                         resolution=cls._read_resolution(model_dir),
                         date_add=datetime.fromtimestamp(model_dir.stat().st_mtime).isoformat(),
                         size_bytes=size_bytes,
+                        trained=(model_dir / "training-metadata.json").exists(),
                     ))
         return models
 
@@ -380,6 +381,7 @@ class RfDetrService:
             resolution=cls._read_resolution(target_dir),
             date_add=datetime.fromtimestamp(target_dir.stat().st_mtime).isoformat(),
             size_bytes=size_bytes,
+            trained=(target_dir / "training-metadata.json").exists(),
         )
 
     @classmethod

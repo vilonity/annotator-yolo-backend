@@ -10,6 +10,9 @@ class YoloModelInfo(BaseModel):
     # Square training resolution from training-metadata.json; None for uploaded
     # models or jobs that trained with auto imgsz.
     imgsz: Optional[int] = None
+    # True when the model was produced by a training job on this server
+    # (training-metadata.json exists); False for uploaded weights.
+    trained: bool = False
 
 
 class AutoAnnotateRequest(BaseModel):

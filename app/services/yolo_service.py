@@ -275,6 +275,7 @@ class YoloService:
                         date_add=datetime.fromtimestamp(model_dir.stat().st_mtime).isoformat(),
                         size_bytes=size_bytes,
                         imgsz=cls._read_imgsz(model_dir),
+                        trained=(model_dir / "training-metadata.json").exists(),
                     ))
         return models
 
@@ -311,6 +312,7 @@ class YoloService:
             date_add=datetime.fromtimestamp(target_dir.stat().st_mtime).isoformat(),
             size_bytes=size_bytes,
             imgsz=cls._read_imgsz(target_dir),
+            trained=(target_dir / "training-metadata.json").exists(),
         )
 
     @classmethod
