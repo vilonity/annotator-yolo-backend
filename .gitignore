@@ -1,4 +1,5 @@
 yolo_models/
+rfdetr_models/
 sam3_models/
 sam2_models/
 .flash/
