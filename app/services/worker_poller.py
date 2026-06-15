@@ -39,6 +39,10 @@ ERROR_BACKOFF_MAX_SECONDS = 60.0
 # The server re-queues a claimed job after STALE_CLAIM_MS (3 min) without a
 # heartbeat, so refresh the claim well within that window while downloading.
 CLAIM_HEARTBEAT_INTERVAL_SECONDS = 60.0
+# How often (after an initial sync on startup) to pull completed cloud-trained
+# models from the API and register any not already in the local registry.
+MODEL_SYNC_INTERVAL_SECONDS = 300.0
+_RFDETR_VARIANTS = {"nano", "small", "medium", "large"}
 
 
 class JobCancelledDuringDownload(Exception):
@@ -97,6 +101,10 @@ class WorkerPoller:
 
     def _loop(self) -> None:
         backoff = ERROR_BACKOFF_MIN_SECONDS
+        # Bring in cloud-trained models before the first poll, so simply starting
+        # the server registers them even when no training is queued.
+        self._sync_models()
+        last_model_sync = time.monotonic()
         while True:
             try:
                 response = requests.post(
@@ -122,6 +130,10 @@ class WorkerPoller:
                 job = data.get("job")
                 if job:
                     self._handle_job(job)
+
+                if time.monotonic() - last_model_sync >= MODEL_SYNC_INTERVAL_SECONDS:
+                    self._sync_models()
+                    last_model_sync = time.monotonic()
 
                 backoff = ERROR_BACKOFF_MIN_SECONDS
             except Exception as exc:  # noqa: BLE001
@@ -330,6 +342,114 @@ class WorkerPoller:
                 Path(tmp_dir).rmdir()
             except OSError:
                 pass
+
+    # ── cloud model sync ─────────────────────────────────────────────
+
+    def _sync_models(self) -> None:
+        """Pull completed cloud-trained models from the API and register them locally.
+
+        RunPod (cloud) training uploads weights to the central API, which can't
+        reach this machine — so on startup and every MODEL_SYNC_INTERVAL_SECONDS we
+        pull any produced model we don't already have and register it into the
+        local registry, exactly like an uploaded model. Best-effort: failures are
+        logged and retried on the next cycle.
+        """
+        try:
+            response = requests.get(
+                f"{self._api_url}/api/worker/models",
+                headers=self._headers(),
+                timeout=POLL_TIMEOUT_SECONDS,
+                verify=self._verify_tls,
+            )
+            if response.status_code == 401:
+                return  # token rejected — the poll loop already surfaces this
+            response.raise_for_status()
+            models = response.json()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[worker-poller] model sync list failed: {exc}", flush=True)
+            return
+
+        if not isinstance(models, list):
+            return
+        for model in models:
+            if not isinstance(model, dict):
+                continue
+            try:
+                self._sync_one_model(model)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[worker-poller] failed to sync model {model.get('produced_model_name')}: {exc}", flush=True)
+
+    def _sync_one_model(self, model: dict[str, Any]) -> None:
+        from app.config import RFDETR_MODELS_DIR, YOLO_MODELS_DIR
+        from app.services.rfdetr_service import RfDetrService
+        from app.services.yolo_service import YoloService
+
+        name = model.get("produced_model_name")
+        job_id = model.get("job_id")
+        if not name or job_id is None:
+            return
+        architecture = model.get("architecture") or "yolo"
+        classes = [str(item) for item in (model.get("classes") or [])]
+
+        target_dir = (RFDETR_MODELS_DIR if architecture == "rfdetr" else YOLO_MODELS_DIR) / name
+        if target_dir.exists():
+            return  # already registered — idempotent, first-wins
+
+        variant = ""
+        if architecture == "rfdetr":
+            variant = str(model.get("base_model") or "").strip().lower().removeprefix("rfdetr-")
+            if variant not in _RFDETR_VARIANTS:
+                print(
+                    f"[worker-poller] skipping {name}: cannot resolve RF-DETR variant from base "
+                    f"'{model.get('base_model')}'",
+                    flush=True,
+                )
+                return
+
+        weights = self._download_model_weights(int(job_id))
+        if weights is None:
+            return
+
+        if architecture == "rfdetr":
+            RfDetrService._store_model(name, variant, weights, ".pth", classes)  # noqa: SLF001 - internal reuse
+        else:
+            YoloService._store_model(name, weights, ".pt", classes)  # noqa: SLF001 - internal reuse
+
+        self._write_training_metadata(target_dir, model)
+        print(f"[worker-poller] synced cloud-trained model {name} ({architecture})", flush=True)
+
+    def _download_model_weights(self, job_id: int) -> Optional[bytes]:
+        try:
+            response = requests.get(
+                f"{self._api_url}/api/worker/models/{job_id}/weights",
+                headers=self._headers(),
+                timeout=DOWNLOAD_TIMEOUT_SECONDS,
+                verify=self._verify_tls,
+                stream=False,
+            )
+            response.raise_for_status()
+            return response.content
+        except Exception as exc:  # noqa: BLE001
+            print(f"[worker-poller] weights download for job {job_id} failed: {exc}", flush=True)
+            return None
+
+    @staticmethod
+    def _write_training_metadata(model_dir: Path, model: dict[str, Any]) -> None:
+        """Mark the synced model as trained and record imgsz (YoloService._read_imgsz reads it)."""
+        metadata = {
+            "provider": "runpod",
+            "job_id": model.get("job_id"),
+            "imgsz": model.get("imgsz"),
+            "classes": model.get("classes") or [],
+            "output_model_name": model.get("produced_model_name"),
+            "base_model": model.get("base_model"),
+            "synced_at": now_iso(),
+        }
+        try:
+            with (model_dir / "training-metadata.json").open("w", encoding="utf-8") as fh:
+                json.dump(metadata, fh, ensure_ascii=True, indent=2)
+        except OSError as exc:
+            print(f"[worker-poller] failed to write training-metadata for {model_dir.name}: {exc}", flush=True)
 
 
 def start_worker_poller_if_configured() -> Optional[WorkerPoller]:
