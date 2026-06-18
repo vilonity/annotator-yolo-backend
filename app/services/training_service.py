@@ -401,7 +401,7 @@ class TrainingService:
         )
 
     @classmethod
-    async def cancel_job(cls, job_id: str) -> TrainingJobDetail:
+    async def cancel_job(cls, job_id: str, keep_partial: bool = False) -> TrainingJobDetail:
         job = cls.get_job(job_id)
         if job.status in {"completed", "failed", "cancelled", "interrupted"}:
             return job
@@ -455,13 +455,26 @@ class TrainingService:
 
         metadata = cls._read_metadata(job_dir) or {}
         metadata["status"] = "cancelling"
-        metadata["error"] = "Cancellation requested"
+        metadata["keep_partial"] = keep_partial
+        metadata["error"] = "Stopping early to keep the partial model" if keep_partial else "Cancellation requested"
         cls._write_metadata(job_dir, metadata)
         training_callback.post_progress_async(
             callback_url, callback_secret, {"status": "cancelling", "error": metadata["error"]}
         )
 
-        process.terminate()
+        if keep_partial:
+            # Cooperative stop: drop a sentinel the training subprocess polls at the
+            # end of each epoch. It sets trainer.stop / should_stop so the framework
+            # finishes the current epoch, saves its best checkpoint, registers the
+            # model, and exits 0 — _monitor_process then finalizes the job as
+            # "cancelled" WITH the produced model instead of discarding it.
+            try:
+                (job_dir / "stop.flag").write_text("1", encoding="utf-8")
+            except OSError as exc:
+                print(f"[training] failed to write stop.flag for {job_id}: {exc}; hard-cancelling", flush=True)
+                process.terminate()
+        else:
+            process.terminate()
         return cls.get_job(job_id)
 
     @classmethod
@@ -530,8 +543,13 @@ class TrainingService:
         metadata = cls._read_metadata(job_dir) or {}
         metadata["completed_at"] = now_iso()
 
+        # A cooperative "stop & keep" exits 0 with the model registered just like a
+        # full run (the subprocess saw stop.flag and stopped gracefully) — keep the
+        # produced model but report the job as cancelled (stopped early), not completed.
+        stopped_early = (job_dir / "stop.flag").exists()
+
         if return_code == 0:
-            metadata["status"] = "completed"
+            metadata["status"] = "cancelled" if stopped_early else "completed"
             metadata["produced_model_name"] = metadata.get("output_model_name")
             metadata["metrics"] = cls._read_json(job_dir / "metrics.json")
             metadata["artifacts"] = cls._read_json(job_dir / "artifacts.json")
@@ -547,6 +565,14 @@ class TrainingService:
         cls._write_metadata(job_dir, metadata)
 
         callback_url, callback_secret = training_callback.load_callback_settings(job_dir / "config.json")
+
+        # The successful path uploads artifacts from the worker subprocess. A
+        # cancelled/failed run is hard-killed before that, so push whatever
+        # ultralytics already flushed to disk (notably the per-epoch results.csv)
+        # so the UI can still show training curves for the partial run.
+        if metadata["status"] != "completed":
+            cls._upload_partial_artifacts(job_dir, callback_url, callback_secret)
+
         training_callback.post_progress(
             callback_url,
             callback_secret,
@@ -558,6 +584,39 @@ class TrainingService:
                 "error": metadata.get("error"),
             },
         )
+
+    # Partial artifacts an interrupted ultralytics run leaves under runs/train.
+    # results.csv is written each epoch; the plot PNGs only after a full run, so
+    # they may be absent — upload whatever exists.
+    _PARTIAL_ARTIFACT_FILES = (
+        "results.csv",
+        "results.png",
+        "confusion_matrix.png",
+        "confusion_matrix_normalized.png",
+        "PR_curve.png",
+        "F1_curve.png",
+        "P_curve.png",
+        "R_curve.png",
+        # RF-DETR per-epoch metrics (PTL CSVLogger / legacy DETR JSONL).
+        "metrics.csv",
+        "log.txt",
+    )
+
+    @classmethod
+    def _upload_partial_artifacts(cls, job_dir: Path, callback_url, callback_secret) -> None:
+        if not callback_url or not callback_secret:
+            return
+        results_dir = job_dir / "runs" / "train"
+        if not results_dir.is_dir():
+            return
+        for filename in cls._PARTIAL_ARTIFACT_FILES:
+            candidate = results_dir / filename
+            if not candidate.exists():
+                continue
+            try:
+                training_callback.put_artifact(callback_url, callback_secret, filename, candidate)
+            except Exception as exc:  # noqa: BLE001
+                print(f"[training] partial artifact upload failed for {filename}: {exc}", flush=True)
 
     @classmethod
     def _resolve_dataset_root(cls, dataset_dir: Path) -> Path:

@@ -4,6 +4,7 @@ from .rfdetr import router as rfdetr_router
 from .sam3 import router as sam3_router
 from .sam2 import router as sam2_router
 from .training import router as training_router
+from .worker import router as worker_router
 
 __all__ = [
     "health_router",
@@ -12,4 +13,5 @@ __all__ = [
     "sam3_router",
     "sam2_router",
     "training_router",
+    "worker_router",
 ]

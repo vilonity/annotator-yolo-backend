@@ -65,7 +65,7 @@ class YoloService:
         cls,
         name: str,
         weights_file: UploadFile,
-        classes_file: UploadFile,
+        classes_file: Optional[UploadFile],
     ) -> UploadModelResponse:
         cls._ensure_new_model(name)
 
@@ -74,10 +74,57 @@ class YoloService:
             raise HTTPException(status_code=400, detail="Weights must be a .pt or .onnx file")
 
         weights_bytes = await weights_file.read()
-        classes_text = (await classes_file.read()).decode("utf-8")
-        classes_list = cls._parse_classes_text(classes_text)
+        classes_text = await cls._read_optional_classes(classes_file)
+        classes_list = cls._resolve_classes(classes_text, weights_bytes, weights_ext)
 
         return cls._store_model(name, weights_bytes, weights_ext, classes_list)
+
+    @staticmethod
+    async def _read_optional_classes(classes_file: Optional[UploadFile]) -> Optional[str]:
+        if classes_file is None or not (classes_file.filename or "").strip():
+            return None
+        return (await classes_file.read()).decode("utf-8")
+
+    @classmethod
+    def _resolve_classes(cls, classes_text: Optional[str], weights_bytes: bytes, weights_ext: str) -> List[str]:
+        if classes_text is not None:
+            return cls._parse_classes_text(classes_text)
+        return cls._derive_classes_from_weights(weights_bytes, weights_ext)
+
+    @classmethod
+    def _derive_classes_from_weights(cls, weights_bytes: bytes, weights_ext: str) -> List[str]:
+        """Read class names straight from the checkpoint so weights can be
+        uploaded without a classes file. Ultralytics ``.pt`` models embed
+        ``model.names``; only a bare file with no recoverable names errors out.
+        """
+        with tempfile.NamedTemporaryFile(suffix=weights_ext, delete=False) as tmp:
+            tmp.write(weights_bytes)
+            tmp_path = Path(tmp.name)
+        try:
+            names = cls._names_to_list(getattr(YOLO(str(tmp_path)), "names", None))
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Could not read class names from the weights: {exc}") from exc
+        finally:
+            tmp_path.unlink(missing_ok=True)
+
+        if not names:
+            raise HTTPException(
+                status_code=400,
+                detail="Could not read class names from the weights — attach a classes file",
+            )
+        return names
+
+    @staticmethod
+    def _names_to_list(names: object) -> Optional[List[str]]:
+        if isinstance(names, dict):
+            try:
+                ordered = sorted(names.items(), key=lambda item: int(item[0]))
+            except (TypeError, ValueError):
+                ordered = sorted(names.items(), key=lambda item: str(item[0]))
+            return [str(value) for _, value in ordered]
+        if isinstance(names, (list, tuple)):
+            return [str(value) for value in names]
+        return None
 
     @classmethod
     async def upload_model_archive(cls, name: str, archive_file: UploadFile) -> UploadModelResponse:
@@ -110,13 +157,8 @@ class YoloService:
                 status_code=400,
                 detail="Archive must contain weights.pt or weights.onnx",
             )
-        if classes_text is None:
-            raise HTTPException(
-                status_code=400,
-                detail="Archive must contain classes.json (or classes.txt / classes.yaml)",
-            )
 
-        classes_list = cls._parse_classes_text(classes_text)
+        classes_list = cls._resolve_classes(classes_text, weights_bytes, weights_ext)
         return cls._store_model(name, weights_bytes, weights_ext, classes_list)
 
     @classmethod

@@ -1634,6 +1634,46 @@
 					}
 				}
 			}
+		},
+		"/worker/sync-models": {
+			"post": {
+				"tags": ["worker"],
+				"summary": "Sync Models",
+				"description": "Pull cloud-trained models from the central API into the local registry on\ndemand, so the browser can deliver a model just before running inference\n(e.g. a benchmark run) instead of waiting for the periodic background sync.",
+				"operationId": "sync_models_worker_sync_models_post",
+				"requestBody": {
+					"content": {
+						"application/json": {
+							"schema": {
+								"$ref": "#/components/schemas/WorkerSyncRequest"
+							}
+						}
+					},
+					"required": true
+				},
+				"responses": {
+					"200": {
+						"description": "Successful Response",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/WorkerSyncResponse"
+								}
+							}
+						}
+					},
+					"422": {
+						"description": "Validation Error",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/HTTPValidationError"
+								}
+							}
+						}
+					}
+				}
+			}
 		}
 	},
 	"components": {
@@ -1890,7 +1930,14 @@
 						"title": "Name"
 					},
 					"variant": {
-						"type": "string",
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
 						"title": "Variant"
 					},
 					"archive_file": {
@@ -1900,7 +1947,7 @@
 					}
 				},
 				"type": "object",
-				"required": ["name", "variant", "archive_file"],
+				"required": ["name", "archive_file"],
 				"title": "Body_upload_rfdetr_model_archive_rfdetr_models_archive_post"
 			},
 			"Body_upload_rfdetr_model_rfdetr_models_post": {
@@ -1910,7 +1957,14 @@
 						"title": "Name"
 					},
 					"variant": {
-						"type": "string",
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
 						"title": "Variant"
 					},
 					"weights_file": {
@@ -1919,13 +1973,20 @@
 						"title": "Weights File"
 					},
 					"classes_file": {
-						"type": "string",
-						"format": "binary",
+						"anyOf": [
+							{
+								"type": "string",
+								"format": "binary"
+							},
+							{
+								"type": "null"
+							}
+						],
 						"title": "Classes File"
 					}
 				},
 				"type": "object",
-				"required": ["name", "variant", "weights_file", "classes_file"],
+				"required": ["name", "weights_file"],
 				"title": "Body_upload_rfdetr_model_rfdetr_models_post"
 			},
 			"Body_upload_sam2_model_sam2_models_post": {
@@ -1988,13 +2049,20 @@
 						"title": "Weights File"
 					},
 					"classes_file": {
-						"type": "string",
-						"format": "binary",
+						"anyOf": [
+							{
+								"type": "string",
+								"format": "binary"
+							},
+							{
+								"type": "null"
+							}
+						],
 						"title": "Classes File"
 					}
 				},
 				"type": "object",
-				"required": ["name", "weights_file", "classes_file"],
+				"required": ["name", "weights_file"],
 				"title": "Body_upload_yolo_model_yolo_models_post"
 			},
 			"DeviceInfo": {
@@ -3517,6 +3585,41 @@
 				"type": "object",
 				"required": ["loc", "msg", "type"],
 				"title": "ValidationError"
+			},
+			"WorkerSyncRequest": {
+				"properties": {
+					"name": {
+						"anyOf": [
+							{
+								"type": "string"
+							},
+							{
+								"type": "null"
+							}
+						],
+						"title": "Name"
+					}
+				},
+				"type": "object",
+				"title": "WorkerSyncRequest"
+			},
+			"WorkerSyncResponse": {
+				"properties": {
+					"configured": {
+						"type": "boolean",
+						"title": "Configured"
+					},
+					"models": {
+						"items": {
+							"type": "string"
+						},
+						"type": "array",
+						"title": "Models"
+					}
+				},
+				"type": "object",
+				"required": ["configured", "models"],
+				"title": "WorkerSyncResponse"
 			},
 			"YoloModelInfo": {
 				"properties": {

@@ -120,7 +120,7 @@ def run(
     print(f"[training] loading RF-DETR {variant} (pretrain={pretrain_weights or 'COCO default'})", flush=True)
     model = model_class(**init_kwargs)
 
-    detach_epoch_callback = _attach_epoch_callback(model, on_epoch_end)
+    detach_epoch_callback = _attach_epoch_callback(model, on_epoch_end, stop_flag_path=job_dir / "stop.flag")
 
     train_args: dict[str, Any] = {
         "dataset_dir": str(coco_dir),
@@ -197,10 +197,18 @@ def run(
     metrics = read_training_metrics(output_dir)
     print(f"[training] registered RF-DETR model at {registered_weights}", flush=True)
 
+    uploads: list[tuple[str, Path]] = [("weights.pth", registered_weights)]
+    # Per-epoch training metrics so the browser can render interactive curves:
+    # metrics.csv (PTL CSVLogger, rfdetr >= 1.7) or the legacy DETR-style log.txt.
+    for filename in ("metrics.csv", "log.txt"):
+        candidate = output_dir / filename
+        if candidate.exists():
+            uploads.append((filename, candidate))
+
     return {
         "metrics": metrics,
         "artifacts": {"best_weights_path": str(registered_weights), "results_csv_path": None},
-        "uploads": [("weights.pth", registered_weights)],
+        "uploads": uploads,
     }
 
 
@@ -243,7 +251,11 @@ def resolve_base_model(base_model: str) -> tuple[str, Optional[Path], Optional[i
     )
 
 
-def _attach_epoch_callback(model: Any, on_epoch_end: Callable[[int], None]) -> Callable[[], None]:
+def _attach_epoch_callback(
+    model: Any,
+    on_epoch_end: Callable[[int], None],
+    stop_flag_path: Optional[Path] = None,
+) -> Callable[[], None]:
     """Hook per-epoch progress reporting into rfdetr.
 
     rfdetr >= 1.7 trains through PyTorch Lightning and discards the legacy
@@ -253,6 +265,10 @@ def _attach_epoch_callback(model: Any, on_epoch_end: Callable[[int], None]) -> C
     attribute is enough; passing ``callbacks`` through trainer kwargs would
     replace the built-in EMA/checkpoint callbacks). Older versions still
     consume the dict. Returns a detach function that undoes the patch.
+
+    When ``stop_flag_path`` exists at an epoch boundary, the PTL trainer is asked
+    to stop gracefully (cooperative "stop & keep") so the best checkpoint is saved
+    and registered — the legacy dict path has no trainer handle, so it can't stop.
     """
     try:
         import pytorch_lightning as pl
@@ -269,6 +285,9 @@ def _attach_epoch_callback(model: Any, on_epoch_end: Callable[[int], None]) -> C
                     on_epoch_end(int(trainer.current_epoch) + 1)
                 except (TypeError, ValueError):
                     pass
+                if stop_flag_path is not None and stop_flag_path.exists():
+                    print("[training] stop.flag detected — stopping RF-DETR after this epoch", flush=True)
+                    trainer.should_stop = True
 
         def build_trainer_with_progress(*args: Any, **kwargs: Any) -> Any:
             trainer = original_build_trainer(*args, **kwargs)

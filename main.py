@@ -4,7 +4,15 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from pathlib import Path
 
-from app.routers import health_router, yolo_router, rfdetr_router, sam3_router, sam2_router, training_router
+from app.routers import (
+    health_router,
+    yolo_router,
+    rfdetr_router,
+    sam3_router,
+    sam2_router,
+    training_router,
+    worker_router,
+)
 from app.services.training_service import TrainingService
 from app.services.worker_poller import start_worker_poller_if_configured
 
@@ -24,9 +32,13 @@ class PrivateNetworkMiddleware(BaseHTTPMiddleware):
         response.headers["Access-Control-Allow-Private-Network"] = "true"
         return response
 
+# With credentials mode "include" the browser rejects a wildcard
+# Access-Control-Allow-Origin, so reflect the request origin instead of "*".
+# allow_origin_regex=".*" makes Starlette echo the caller's Origin (and emit
+# Access-Control-Allow-Credentials: true), which a wildcard allow_origins cannot.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origin_regex=".*",
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -40,6 +52,7 @@ app.include_router(rfdetr_router)
 app.include_router(sam3_router)
 app.include_router(sam2_router)
 app.include_router(training_router)
+app.include_router(worker_router)
 
 if __name__ == "__main__":
     import uvicorn

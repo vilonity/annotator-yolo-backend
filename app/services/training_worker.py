@@ -112,22 +112,30 @@ def main() -> int:
             log_streamer.join(timeout=3)
         _flush_remaining_logs(logs_path, callback_url, callback_secret)
 
-        progress_ok = training_callback.post_progress(
-            callback_url,
-            callback_secret,
-            {
-                "status": "completed",
-                "completed_at": _now_iso(),
-                "produced_model_name": config["output_model_name"],
-                "current_epoch": total_epochs,
-                "total_epochs": total_epochs,
-                "metrics": metrics,
-            },
-        )
+        # A cooperative "stop & keep" (the API dropped stop.flag) finishes the current
+        # epoch and registers the best checkpoint exactly like a full run, but the job
+        # is reported as cancelled (stopped early) — keeping the produced model.
+        stopped_early = (job_dir / "stop.flag").exists()
+        progress_payload = {
+            "status": "cancelled" if stopped_early else "completed",
+            "completed_at": _now_iso(),
+            "produced_model_name": config["output_model_name"],
+            "total_epochs": total_epochs,
+            "metrics": metrics,
+        }
+        # A full run reports the final epoch; a stop-&-keep leaves current_epoch at the
+        # last epoch already reported per-epoch, so the UI shows where it stopped.
+        if not stopped_early:
+            progress_payload["current_epoch"] = total_epochs
+        progress_ok = training_callback.post_progress(callback_url, callback_secret, progress_payload)
 
         artifacts_ok = _upload_artifacts(callback_url, callback_secret, outcome["uploads"])
 
-        if progress_ok and artifacts_ok:
+        if stopped_early:
+            # Keep job_dir so _monitor_process still sees stop.flag (and the metadata)
+            # when it finalizes the job as cancelled-with-model.
+            print(f"[training] stop & keep: keeping {job_dir} for finalization", flush=True)
+        elif progress_ok and artifacts_ok:
             shutil.rmtree(job_dir, ignore_errors=True)
             print(f"[training] cleaned up {job_dir}", flush=True)
         else:
@@ -213,12 +221,19 @@ def _run_yolo_training(config: dict, job_dir: Path, *, on_epoch_end) -> dict:
 
     total_epochs = int(config["epochs"])
 
+    stop_flag_path = job_dir / "stop.flag"
+
     def _on_train_epoch_end(trainer) -> None:  # type: ignore[no-untyped-def]
         try:
             epoch = int(getattr(trainer, "epoch", 0)) + 1
         except Exception:  # noqa: BLE001
             return
         on_epoch_end(epoch)
+        # Cooperative "stop & keep": ask ultralytics to stop after this epoch so the
+        # final validation runs, best.pt is saved, and the model registers normally.
+        if stop_flag_path.exists():
+            print("[training] stop.flag detected — stopping after this epoch", flush=True)
+            trainer.stop = True
 
     model.add_callback("on_train_epoch_end", _on_train_epoch_end)
 

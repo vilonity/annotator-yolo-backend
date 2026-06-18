@@ -123,27 +123,29 @@ class RfDetrService:
     async def upload_model(
         cls,
         name: str,
-        variant: str,
+        variant: Optional[str],
         weights_file: UploadFile,
-        classes_file: UploadFile,
+        classes_file: Optional[UploadFile],
     ) -> RfDetrUploadResponse:
         cls._ensure_new_model(name)
-        cls._validate_variant(variant)
 
         weights_ext = Path(weights_file.filename or "").suffix.lower()
         if weights_ext not in SUPPORTED_WEIGHTS_EXTS:
             raise HTTPException(status_code=400, detail="Weights must be a .pth or .pt file")
 
         weights_bytes = await weights_file.read()
-        classes_text = (await classes_file.read()).decode("utf-8")
-        classes_list = cls._parse_classes_text(classes_text)
+        classes_text = await cls._read_optional_classes(classes_file)
 
-        return cls._store_model(name, variant, weights_bytes, weights_ext, classes_list)
+        resolved_variant, classes_list, resolution = cls._resolve_variant_and_classes(
+            variant, classes_text, weights_bytes
+        )
+        return cls._store_model(name, resolved_variant, weights_bytes, weights_ext, classes_list, resolution)
 
     @classmethod
-    async def upload_model_archive(cls, name: str, variant: str, archive_file: UploadFile) -> RfDetrUploadResponse:
+    async def upload_model_archive(
+        cls, name: str, variant: Optional[str], archive_file: UploadFile
+    ) -> RfDetrUploadResponse:
         cls._ensure_new_model(name)
-        cls._validate_variant(variant)
 
         raw = await archive_file.read()
         try:
@@ -169,11 +171,140 @@ class RfDetrService:
 
         if weights_bytes is None or weights_ext is None:
             raise HTTPException(status_code=400, detail="Archive must contain weights.pth or weights.pt")
-        if classes_text is None:
-            raise HTTPException(status_code=400, detail="Archive must contain classes.json (or classes.txt)")
 
-        classes_list = cls._parse_classes_text(classes_text)
-        return cls._store_model(name, variant, weights_bytes, weights_ext, classes_list)
+        resolved_variant, classes_list, resolution = cls._resolve_variant_and_classes(
+            variant, classes_text, weights_bytes
+        )
+        return cls._store_model(name, resolved_variant, weights_bytes, weights_ext, classes_list, resolution)
+
+    @staticmethod
+    async def _read_optional_classes(classes_file: Optional[UploadFile]) -> Optional[str]:
+        if classes_file is None or not (classes_file.filename or "").strip():
+            return None
+        return (await classes_file.read()).decode("utf-8")
+
+    @classmethod
+    def _resolve_variant_and_classes(
+        cls,
+        provided_variant: Optional[str],
+        classes_text: Optional[str],
+        weights_bytes: bytes,
+    ) -> tuple[str, List[str], Optional[int]]:
+        """Settle the variant + class list for an upload, filling gaps from the checkpoint.
+
+        Reading the checkpoint is only needed to cover a missing variant or
+        classes file, so the torch import/load is skipped when both are supplied.
+        """
+        normalized_provided = provided_variant.strip().lower() if provided_variant else None
+
+        detected_variant: Optional[str] = None
+        head_num_classes: Optional[int] = None
+        resolution: Optional[int] = None
+        if normalized_provided is None or classes_text is None:
+            detected_variant, head_num_classes, resolution = cls._inspect_checkpoint(weights_bytes)
+
+        # The size class is baked into the weights, so a value read from the
+        # checkpoint is authoritative over the caller's hint.
+        variant = detected_variant or normalized_provided or DEFAULT_VARIANT
+        cls._validate_variant(variant)
+
+        if classes_text is not None:
+            classes_list = cls._parse_classes_text(classes_text)
+        elif head_num_classes is not None:
+            classes_list = [f"class{index + 1}" for index in range(head_num_classes)]
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "No classes file provided and the class count could not be read "
+                    "from the checkpoint — attach a classes file"
+                ),
+            )
+        return variant, classes_list, resolution
+
+    @classmethod
+    def _inspect_checkpoint(cls, weights_bytes: bytes) -> tuple[Optional[str], Optional[int], Optional[int]]:
+        """Best-effort (variant, class count, resolution) read from a raw checkpoint.
+
+        Lets a user upload bare weights: the rfdetr detection head is
+        ``Linear(hidden, num_classes + 1)``, so the real class count is
+        ``class_embed.bias.shape[0] - 1``; newer checkpoints also carry a
+        ``model_name`` (e.g. ``"RFDETRMedium"``) and the trained ``resolution``
+        in ``args``. ``torch.load`` runs the pickle, same as rfdetr's own
+        ``from_checkpoint`` — acceptable for a model the user registers on their
+        own server. Returns ``(None, None, None)`` on any failure so the caller
+        falls back to the supplied variant / classes file.
+        """
+        try:
+            import torch
+        except ImportError:
+            return None, None, None
+        try:
+            checkpoint = torch.load(io.BytesIO(weights_bytes), map_location="cpu", weights_only=False)
+        except Exception as exc:
+            logger.warning("Could not read RF-DETR checkpoint for auto-detection: %s", exc)
+            return None, None, None
+
+        return (
+            cls._variant_from_checkpoint(checkpoint),
+            cls._num_classes_from_checkpoint(checkpoint),
+            cls._resolution_from_checkpoint(checkpoint),
+        )
+
+    @staticmethod
+    def _variant_from_checkpoint(checkpoint: Any) -> Optional[str]:
+        if not isinstance(checkpoint, dict):
+            return None
+        # New rfdetr checkpoints store the variant class symbol directly.
+        model_name = checkpoint.get("model_name")
+        if isinstance(model_name, str):
+            lowered = model_name.strip().lower()
+            for variant in RFDETR_VARIANTS:
+                if lowered in (variant, f"rfdetr{variant}"):
+                    return variant
+        # Legacy checkpoints only record the base weights they fine-tuned from.
+        args = checkpoint.get("args")
+        pretrain = args.get("pretrain_weights") if isinstance(args, dict) else getattr(args, "pretrain_weights", None)
+        pretrain_name = str(pretrain or "").lower()
+        for variant in RFDETR_VARIANTS:
+            if variant in pretrain_name:
+                return variant
+        return None
+
+    @staticmethod
+    def _num_classes_from_checkpoint(checkpoint: Any) -> Optional[int]:
+        state = checkpoint.get("model") if isinstance(checkpoint, dict) else None
+        if not isinstance(state, dict):
+            state = checkpoint if isinstance(checkpoint, dict) else None
+        if not isinstance(state, dict):
+            return None
+        bias = state.get("class_embed.bias")
+        if bias is None:
+            bias = next(
+                (value for key, value in state.items() if isinstance(key, str) and key.endswith("class_embed.bias")),
+                None,
+            )
+        shape = getattr(bias, "shape", None)
+        if not shape:
+            return None
+        try:
+            # The head carries an extra no-object slot — drop it for the real count.
+            num_classes = int(shape[0]) - 1
+        except (TypeError, ValueError, IndexError):
+            return None
+        return num_classes if num_classes >= 1 else None
+
+    @staticmethod
+    def _resolution_from_checkpoint(checkpoint: Any) -> Optional[int]:
+        if not isinstance(checkpoint, dict):
+            return None
+        args = checkpoint.get("args")
+        resolution = args.get("resolution") if isinstance(args, dict) else getattr(args, "resolution", None)
+        if isinstance(resolution, bool):
+            return None
+        if isinstance(resolution, int) and resolution > 0:
+            return resolution
+        return None
 
     @classmethod
     def get_model_files(cls, name: str) -> tuple[Path, Path]:
@@ -300,6 +431,7 @@ class RfDetrService:
         weights_bytes: bytes,
         weights_ext: str,
         classes_list: List[str],
+        resolution: Optional[int] = None,
     ) -> RfDetrUploadResponse:
         model_dir = RFDETR_MODELS_DIR / name
         model_dir.mkdir(parents=True, exist_ok=True)
@@ -312,8 +444,14 @@ class RfDetrService:
             with (model_dir / "classes.json").open("w", encoding="utf-8") as f:
                 json.dump(classes_list, f, ensure_ascii=False)
 
+            # Persist the resolution only when it was recoverable from the
+            # checkpoint, so loads of a custom-resolution upload size their
+            # positional embeddings correctly instead of using the variant default.
+            metadata: dict[str, Any] = {"variant": variant}
+            if resolution is not None:
+                metadata["resolution"] = resolution
             with (model_dir / "metadata.json").open("w", encoding="utf-8") as f:
-                json.dump({"variant": variant}, f, ensure_ascii=True)
+                json.dump(metadata, f, ensure_ascii=True)
         except Exception:
             shutil.rmtree(model_dir, ignore_errors=True)
             raise

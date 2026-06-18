@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import FileResponse
@@ -19,7 +19,7 @@ router = APIRouter(prefix="/yolo-models", tags=["yolo"])
 async def upload_yolo_model(
     name: str = Form(...),
     weights_file: UploadFile = File(...),
-    classes_file: UploadFile = File(...),
+    classes_file: Optional[UploadFile] = File(None),
 ):
     return await YoloService.upload_model(name, weights_file, classes_file)
 

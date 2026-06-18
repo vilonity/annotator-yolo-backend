@@ -1,4 +1,4 @@
-from typing import List
+from typing import List, Optional
 
 from fastapi import APIRouter, File, Form, UploadFile
 from fastapi.responses import FileResponse
@@ -18,9 +18,9 @@ router = APIRouter(prefix="/rfdetr-models", tags=["rfdetr"])
 @router.post("", response_model=RfDetrUploadResponse)
 async def upload_rfdetr_model(
     name: str = Form(...),
-    variant: str = Form(...),
+    variant: Optional[str] = Form(None),
     weights_file: UploadFile = File(...),
-    classes_file: UploadFile = File(...),
+    classes_file: Optional[UploadFile] = File(None),
 ):
     return await RfDetrService.upload_model(name, variant, weights_file, classes_file)
 
@@ -28,7 +28,7 @@ async def upload_rfdetr_model(
 @router.post("/archive", response_model=RfDetrUploadResponse)
 async def upload_rfdetr_model_archive(
     name: str = Form(...),
-    variant: str = Form(...),
+    variant: Optional[str] = Form(None),
     archive_file: UploadFile = File(...),
 ):
     return await RfDetrService.upload_model_archive(name, variant, archive_file)

@@ -17,6 +17,8 @@ ARTIFACT_MEDIA_TYPES: dict[str, str] = {
     "P_curve.png": "image/png",
     "R_curve.png": "image/png",
     "results.csv": "text/csv",
+    "metrics.csv": "text/csv",
+    "log.txt": "text/plain",
 }
 
 router = APIRouter(prefix="/training", tags=["training"])

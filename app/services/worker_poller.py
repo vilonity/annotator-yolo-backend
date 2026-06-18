@@ -180,8 +180,12 @@ class WorkerPoller:
                     },
                 )
             else:
-                asyncio.run(TrainingService.cancel_job(local_id))
-                print(f"[worker-poller] cancellation forwarded to job {local_id}", flush=True)
+                keep_partial = bool(cancellation.get("keep_partial"))
+                asyncio.run(TrainingService.cancel_job(local_id, keep_partial=keep_partial))
+                print(
+                    f"[worker-poller] cancellation forwarded to job {local_id} (keep_partial={keep_partial})",
+                    flush=True,
+                )
         except Exception as exc:  # noqa: BLE001
             print(f"[worker-poller] cancel of {local_id} failed: {exc}", flush=True)
 
@@ -345,6 +349,51 @@ class WorkerPoller:
 
     # ── cloud model sync ─────────────────────────────────────────────
 
+    def sync_now(self, name: Optional[str] = None) -> list[str]:
+        """On-demand variant of ``_sync_models``: pull the model list, register
+        the requested model (or all when ``name`` is None), and return the names
+        now present in the local registry.
+
+        Used by ``POST /worker/sync-models`` so the web app can deliver a
+        cloud-trained model to this machine just before running inference
+        against it, instead of waiting for the periodic background sync.
+        """
+        from app.config import RFDETR_MODELS_DIR, YOLO_MODELS_DIR
+
+        try:
+            response = requests.get(
+                f"{self._api_url}/api/worker/models",
+                headers=self._headers(),
+                timeout=POLL_TIMEOUT_SECONDS,
+                verify=self._verify_tls,
+            )
+            response.raise_for_status()
+            models = response.json()
+        except Exception as exc:  # noqa: BLE001
+            print(f"[worker-poller] on-demand model sync list failed: {exc}", flush=True)
+            return []
+
+        if not isinstance(models, list):
+            return []
+
+        present: list[str] = []
+        for model in models:
+            if not isinstance(model, dict):
+                continue
+            model_name = model.get("produced_model_name")
+            if not model_name or (name is not None and model_name != name):
+                continue
+            try:
+                self._sync_one_model(model)  # idempotent: first-wins if already present
+            except Exception as exc:  # noqa: BLE001
+                print(f"[worker-poller] failed to sync model {model_name}: {exc}", flush=True)
+                continue
+            architecture = model.get("architecture") or "yolo"
+            target_dir = (RFDETR_MODELS_DIR if architecture == "rfdetr" else YOLO_MODELS_DIR) / model_name
+            if target_dir.exists():
+                present.append(model_name)
+        return present
+
     def _sync_models(self) -> None:
         """Pull completed cloud-trained models from the API and register them locally.
 
@@ -452,7 +501,26 @@ class WorkerPoller:
             print(f"[worker-poller] failed to write training-metadata for {model_dir.name}: {exc}", flush=True)
 
 
+# Set once the poller starts so request handlers (e.g. POST /worker/sync-models)
+# can trigger an on-demand model sync without reaching into the poll thread.
+_poller: Optional[WorkerPoller] = None
+
+
+def sync_models_now(name: Optional[str] = None) -> dict[str, Any]:
+    """Trigger an on-demand pull of cloud-trained models into the local registry.
+
+    Returns ``configured=False`` when pull-mode isn't set up (no
+    ANNOTATOR_API_URL / ANNOTATOR_WORKER_TOKEN) so callers can surface an
+    actionable message instead of a silent no-op. ``models`` lists the names now
+    present locally after the sync attempt.
+    """
+    if _poller is None:
+        return {"configured": False, "models": []}
+    return {"configured": True, "models": _poller.sync_now(name)}
+
+
 def start_worker_poller_if_configured() -> Optional[WorkerPoller]:
+    global _poller
     if not ANNOTATOR_API_URL or not ANNOTATOR_WORKER_TOKEN:
         return None
     if requests is None:
@@ -460,4 +528,5 @@ def start_worker_poller_if_configured() -> Optional[WorkerPoller]:
         return None
     poller = WorkerPoller(ANNOTATOR_API_URL, ANNOTATOR_WORKER_TOKEN, verify_tls=ANNOTATOR_API_VERIFY_TLS)
     poller.start()
+    _poller = poller
     return poller
