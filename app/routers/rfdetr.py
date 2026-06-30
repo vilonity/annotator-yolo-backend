@@ -79,8 +79,10 @@ def rename_rfdetr_model(model_name: str, payload: RenameModelRequest):
     return RfDetrService.rename_model(model_name, payload.new_name)
 
 
+# Plain `def` (not async) so the blocking download+inference runs in a threadpool
+# instead of blocking the event loop — see the YOLO annotate route for details.
 @router.post("/{model_name}/annotate", response_model=RfDetrAnnotateResponse)
-async def auto_annotate_images_rfdetr(
+def auto_annotate_images_rfdetr(
     model_name: str,
     payload: RfDetrAnnotateRequest,
 ):

@@ -1,8 +1,10 @@
 import io
 import json
+import logging
 import shutil
 import tempfile
 import threading
+import time
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -14,7 +16,9 @@ from ultralytics import YOLO
 
 from app.config import YOLO_MODELS_DIR
 from app.schemas.yolo import YoloModelInfo, UploadModelResponse, AutoAnnotateRequest
-from app.services.image_service import load_image_from_url
+from app.services.image_service import free_inference_memory, load_image_from_url
+
+logger = logging.getLogger(__name__)
 
 SUPPORTED_WEIGHTS_EXTS = {".pt", ".onnx"}
 SUPPORTED_CLASSES_NAMES = {"classes.json", "classes.txt", "classes.yaml", "classes.yml"}
@@ -24,6 +28,10 @@ class YoloService:
     _cache: dict[str, YOLO] = {}
     _export_locks: dict[str, threading.Lock] = {}
     _export_locks_guard = threading.Lock()
+    # The annotate route is a plain `def` (runs in FastAPI's threadpool), so two
+    # requests could otherwise call predict on the same model object concurrently —
+    # ultralytics isn't thread-safe. Serialize inference; the event loop stays free.
+    _inference_lock = threading.Lock()
 
     @classmethod
     def get_model(cls, name: str) -> tuple[YOLO, list[str]]:
@@ -367,49 +375,68 @@ class YoloService:
             raise HTTPException(status_code=400, detail="image_urls list cannot be empty")
 
         model, class_names = cls.get_model(model_name)
+        total = len(payload.image_urls)
+        logger.info("YOLO annotate '%s': %d image(s)", model_name, total)
 
-        results = []
-        for url in payload.image_urls:
-            img = load_image_from_url(url)
-
-            kwargs = dict(
-                source=img,
-                conf=payload.conf_threshold or 0.25,
-                save=False,
-                verbose=False,
-            )
-            if payload.imgsz is not None:
-                kwargs["imgsz"] = payload.imgsz
-            try:
-                pred = model.predict(**kwargs)
-                results.append(pred[0])
-            except Exception as exc:
-                if payload.imgsz is None:
-                    try:
-                        pred = model.predict(**{**kwargs, "imgsz": 320})
-                        results.append(pred[0])
-                        continue
-                    except Exception:
-                        pass
-                raise HTTPException(status_code=500, detail=f"YOLO inference failed: {exc}") from exc
-
+        # Process one image at a time and discard the heavy prediction object before
+        # the next — holding every result for the whole batch was a needless memory
+        # peak. Each image is logged with timings, and a failure is logged with its
+        # URL + traceback so the offending image is identifiable in the console.
         all_annotations = []
-        for res in results:
-            boxes = res.boxes
-            annotations_list = []
-            for xyxy, cls_idx, conf in zip(boxes.xyxy.tolist(), boxes.cls.tolist(), boxes.conf.tolist()):
-                x1, y1, x2, y2 = xyxy
-                raw_name = class_names[int(cls_idx)] if int(cls_idx) < len(class_names) else str(cls_idx)
-                mapped_name = payload.class_map.get(raw_name, raw_name) if payload.class_map else raw_name
-                annotations_list.append(
-                    {
-                        "bbox": [x1, y1, x2, y2],
-                        "class_id": int(cls_idx),
-                        "class_name": mapped_name,
-                        "confidence": float(conf),
-                        "model": model_name,
-                    }
+        for idx, url in enumerate(payload.image_urls):
+            try:
+                img = load_image_from_url(url)
+                kwargs = dict(
+                    source=img,
+                    conf=payload.conf_threshold or 0.25,
+                    save=False,
+                    verbose=False,
                 )
-            all_annotations.append(annotations_list)
+                if payload.imgsz is not None:
+                    kwargs["imgsz"] = payload.imgsz
+
+                t0 = time.monotonic()
+                try:
+                    with cls._inference_lock:
+                        pred = model.predict(**kwargs)[0]
+                except Exception as exc:
+                    if payload.imgsz is None:
+                        logger.warning("image %d/%d retrying at imgsz=320 after: %s", idx + 1, total, exc)
+                        with cls._inference_lock:
+                            pred = model.predict(**{**kwargs, "imgsz": 320})[0]
+                    else:
+                        raise
+                infer_ms = (time.monotonic() - t0) * 1000
+
+                boxes = pred.boxes
+                annotations_list = []
+                for xyxy, cls_idx, conf in zip(boxes.xyxy.tolist(), boxes.cls.tolist(), boxes.conf.tolist()):
+                    x1, y1, x2, y2 = xyxy
+                    raw_name = class_names[int(cls_idx)] if int(cls_idx) < len(class_names) else str(cls_idx)
+                    mapped_name = payload.class_map.get(raw_name, raw_name) if payload.class_map else raw_name
+                    annotations_list.append(
+                        {
+                            "bbox": [x1, y1, x2, y2],
+                            "class_id": int(cls_idx),
+                            "class_name": mapped_name,
+                            "confidence": float(conf),
+                            "model": model_name,
+                        }
+                    )
+                all_annotations.append(annotations_list)
+                logger.info(
+                    "image %d/%d ok: %d detection(s), infer=%.0f ms", idx + 1, total, len(annotations_list), infer_ms
+                )
+                del pred, img
+            except HTTPException:
+                logger.exception("image %d/%d FAILED (url=%s)", idx + 1, total, url)
+                raise
+            except Exception as exc:
+                logger.exception("image %d/%d FAILED (url=%s)", idx + 1, total, url)
+                raise HTTPException(
+                    status_code=500, detail=f"YOLO inference failed on image {idx + 1}/{total}: {exc}"
+                ) from exc
+            finally:
+                free_inference_memory()
 
         return all_annotations

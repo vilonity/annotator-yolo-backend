@@ -1,4 +1,7 @@
 import base64
+import gc
+import logging
+import time
 from io import BytesIO
 
 import cv2
@@ -6,14 +9,35 @@ import numpy as np
 import requests
 from fastapi import HTTPException
 
+logger = logging.getLogger(__name__)
+
+
+def free_inference_memory() -> None:
+    """Release per-image memory between inferences.
+
+    Repeated predicts on large images accumulate CPU/GPU memory; on a long
+    benchmark run that can OOM-kill the worker (no Python traceback — the process
+    just dies, leaving the browser with an opaque "Failed to fetch"). Collect
+    Python garbage and, when present, empty the CUDA cache after each image.
+    """
+    gc.collect()
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+    except Exception:
+        pass
+
 
 def load_image_from_url(url: str) -> np.ndarray:
     try:
+        t0 = time.monotonic()
         response = requests.get(url, timeout=30)
         response.raise_for_status()
 
-        image_bytes = BytesIO(response.content)
-        file_bytes = np.asarray(bytearray(image_bytes.read()), dtype=np.uint8)
+        content = response.content
+        file_bytes = np.asarray(bytearray(BytesIO(content).read()), dtype=np.uint8)
         img = cv2.imdecode(file_bytes, cv2.IMREAD_COLOR)
 
         if img is None:
@@ -21,8 +45,20 @@ def load_image_from_url(url: str) -> np.ndarray:
 
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
+        h, w = img.shape[:2]
+        logger.info(
+            "Downloaded image %dx%d (%.1f KB) in %.0f ms",
+            w,
+            h,
+            len(content) / 1024,
+            (time.monotonic() - t0) * 1000,
+        )
+
         return img
     except Exception as exc:
+        # Log the URL + reason here — the caller only sees the HTTPException, and a
+        # download/decode failure is otherwise invisible in the server console.
+        logger.warning("Failed to load image from URL %s: %s", url, exc)
         raise HTTPException(status_code=400, detail=f"Failed to load image from URL: {exc}") from exc
 
 

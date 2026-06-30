@@ -1,8 +1,18 @@
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from pathlib import Path
+
+# uvicorn only attaches handlers to its own "uvicorn.*" loggers, so application
+# loggers (logging.getLogger(__name__)) would otherwise be silent. Add a root
+# handler at INFO so inference diagnostics (per-image timings, failures, OOM
+# hints) actually reach the server console. Runs on import in the worker process.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
 
 from app.routers import (
     health_router,

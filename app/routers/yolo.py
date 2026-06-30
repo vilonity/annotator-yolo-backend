@@ -77,8 +77,11 @@ def rename_yolo_model(model_name: str, payload: RenameModelRequest):
     return YoloService.rename_model(model_name, payload.new_name)
 
 
+# Plain `def` (not async) so FastAPI runs the blocking download+inference in a
+# threadpool — an `async def` here would block the event loop for the whole batch,
+# making the single-worker server unreachable (and retries see "Failed to fetch").
 @router.post("/{model_name}/annotate", response_model=AutoAnnotateResponse)
-async def auto_annotate_images(
+def auto_annotate_images(
     model_name: str,
     payload: AutoAnnotateRequest,
 ):

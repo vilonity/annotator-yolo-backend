@@ -74,6 +74,9 @@ class RfDetrService:
     _cache: dict[str, Any] = {}
     _export_locks: dict[str, threading.Lock] = {}
     _export_locks_guard = threading.Lock()
+    # Annotate runs in FastAPI's threadpool (plain `def`); serialize predict so two
+    # requests can't hit the same model object concurrently. See YoloService.
+    _inference_lock = threading.Lock()
 
     @classmethod
     def get_model(cls, name: str) -> tuple[Any, list[str]]:
@@ -528,41 +531,65 @@ class RfDetrService:
         model_name: str,
         payload: RfDetrAnnotateRequest,
     ) -> list[list[dict]]:
-        from app.services.image_service import load_image_from_url
+        import time
+
+        from app.services.image_service import free_inference_memory, load_image_from_url
 
         if not payload.image_urls:
             raise HTTPException(status_code=400, detail="image_urls list cannot be empty")
 
         model, class_names = cls.get_model(model_name)
         threshold = payload.conf_threshold if payload.conf_threshold is not None else 0.5
+        total = len(payload.image_urls)
+        logger.info("RF-DETR annotate '%s': %d image(s)", model_name, total)
 
+        # One image at a time with per-image timings and failure logging (url +
+        # traceback), freeing memory between images — see YoloService.run_inference.
         all_annotations = []
-        for url in payload.image_urls:
-            img = load_image_from_url(url)
+        for idx, url in enumerate(payload.image_urls):
             try:
-                detections = model.predict(img, threshold=threshold)
-            except Exception as exc:
-                raise HTTPException(status_code=500, detail=f"RF-DETR inference failed: {exc}") from exc
+                img = load_image_from_url(url)
+                t0 = time.monotonic()
+                try:
+                    with cls._inference_lock:
+                        detections = model.predict(img, threshold=threshold)
+                except Exception as exc:
+                    raise HTTPException(status_code=500, detail=f"RF-DETR inference failed: {exc}") from exc
+                infer_ms = (time.monotonic() - t0) * 1000
 
-            annotations_list = []
-            for xyxy, class_id, confidence in zip(
-                detections.xyxy.tolist(),
-                detections.class_id.tolist(),
-                detections.confidence.tolist(),
-            ):
-                x1, y1, x2, y2 = xyxy
-                class_index = int(class_id)
-                raw_name = class_names[class_index] if 0 <= class_index < len(class_names) else str(class_index)
-                mapped_name = payload.class_map.get(raw_name, raw_name) if payload.class_map else raw_name
-                annotations_list.append(
-                    {
-                        "bbox": [x1, y1, x2, y2],
-                        "class_id": class_index,
-                        "class_name": mapped_name,
-                        "confidence": float(confidence),
-                        "model": model_name,
-                    }
+                annotations_list = []
+                for xyxy, class_id, confidence in zip(
+                    detections.xyxy.tolist(),
+                    detections.class_id.tolist(),
+                    detections.confidence.tolist(),
+                ):
+                    x1, y1, x2, y2 = xyxy
+                    class_index = int(class_id)
+                    raw_name = class_names[class_index] if 0 <= class_index < len(class_names) else str(class_index)
+                    mapped_name = payload.class_map.get(raw_name, raw_name) if payload.class_map else raw_name
+                    annotations_list.append(
+                        {
+                            "bbox": [x1, y1, x2, y2],
+                            "class_id": class_index,
+                            "class_name": mapped_name,
+                            "confidence": float(confidence),
+                            "model": model_name,
+                        }
+                    )
+                all_annotations.append(annotations_list)
+                logger.info(
+                    "image %d/%d ok: %d detection(s), infer=%.0f ms", idx + 1, total, len(annotations_list), infer_ms
                 )
-            all_annotations.append(annotations_list)
+                del detections, img
+            except HTTPException:
+                logger.exception("image %d/%d FAILED (url=%s)", idx + 1, total, url)
+                raise
+            except Exception as exc:
+                logger.exception("image %d/%d FAILED (url=%s)", idx + 1, total, url)
+                raise HTTPException(
+                    status_code=500, detail=f"RF-DETR inference failed on image {idx + 1}/{total}: {exc}"
+                ) from exc
+            finally:
+                free_inference_memory()
 
         return all_annotations
